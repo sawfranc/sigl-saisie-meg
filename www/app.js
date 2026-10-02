@@ -92,6 +92,60 @@ function totals(rep) {
   return t;
 }
 
+/* ---------- sécurité : mot de passe administrateur (prix public / DRD) ---------- */
+const SHA_K = new Uint32Array([0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]);
+function sha256(msg) {
+  const bytes = new TextEncoder().encode(msg), l = bytes.length, n = ((l + 9 + 63) >> 6) << 6, m = new Uint8Array(n);
+  m.set(bytes); m[l] = 0x80; const dv = new DataView(m.buffer); dv.setUint32(n - 4, (l * 8) >>> 0); dv.setUint32(n - 8, Math.floor(l * 8 / 4294967296));
+  let h = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]; const w = new Uint32Array(64);
+  for (let o = 0; o < n; o += 64) {
+    for (let i = 0; i < 16; i++) w[i] = dv.getUint32(o + i * 4);
+    for (let i = 16; i < 64; i++) { const x = w[i - 15], y = w[i - 2]; w[i] = (w[i - 16] + (((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3)) + w[i - 7] + (((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10))) | 0; }
+    let [a, b, c, d, e, f, g, hh] = h;
+    for (let i = 0; i < 64; i++) {
+      const t1 = (hh + (((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7))) + ((e & f) ^ (~e & g)) + SHA_K[i] + w[i]) | 0;
+      const t2 = ((((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10))) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+      hh = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+    }
+    h = [h[0] + a, h[1] + b, h[2] + c, h[3] + d, h[4] + e, h[5] + f, h[6] + g, h[7] + hh].map(x => x | 0);
+  }
+  return h.map(x => (x >>> 0).toString(16).padStart(8, '0')).join('');
+}
+function hashPw(pw, salt) { let h = sha256(salt + ':' + pw); for (let i = 0; i < 3000; i++) h = sha256(h + salt + pw); return h; }
+const pwRec = () => S.settings.pw || (window.ADMIN_PW && window.ADMIN_PW.hash ? window.ADMIN_PW : null);
+const hasPw = () => !!pwRec();
+const isLocked = () => hasPw() && Date.now() > (S.unlockedUntil || 0);
+function checkPw(pw) { const r = pwRec(); return !!r && hashPw(pw, r.salt) === r.hash; }
+function makePw(pw) { const salt = Array.from(crypto.getRandomValues(new Uint8Array(12))).map(b => b.toString(16).padStart(2, '0')).join(''); return { salt, hash: hashPw(pw, salt) }; }
+function askPw(msg = 'Saisissez le mot de passe administrateur') {
+  return new Promise(res => {
+    const d = $('#dlg2'); let done = false; const fin = v => { if (done) return; done = true; if (d.open) d.close(); res(v); };
+    d.innerHTML = `<div class="dh">🔒 Mot de passe administrateur</div><div class="db"><div class="fm"><label>${esc(msg)}<input type="password" id="pw-in" autocomplete="off"></label><p id="pw-err" style="color:var(--bad);margin:0" hidden></p></div></div><div class="df"><button class="btn sec" data-x>Annuler</button><button class="btn" data-ok>Valider</button></div>`;
+    const err = m => { const e = $('#pw-err'); e.textContent = m; e.hidden = false; };
+    const ok = () => {
+      if (Date.now() < (S.pwBlock || 0)) return err(`Trop d'essais. Réessayez dans ${Math.ceil((S.pwBlock - Date.now()) / 1000)} s.`);
+      if (checkPw($('#pw-in').value)) { S.fails = 0; S.unlockedUntil = Date.now() + 10 * 60 * 1000; fin(true); }
+      else { S.fails = (S.fails || 0) + 1; if (S.fails >= 5) { S.pwBlock = Date.now() + 30000; S.fails = 0; err('Trop d\'essais. Attendez 30 secondes.'); } else err('Mot de passe incorrect.'); $('#pw-in').select(); }
+    };
+    d.querySelector('[data-x]').onclick = () => fin(false); d.querySelector('[data-ok]').onclick = ok;
+    d.addEventListener('close', () => fin(false), { once: true }); d.addEventListener('keydown', e => { if (e.key === 'Enter') ok(); });
+    d.showModal(); setTimeout(() => $('#pw-in') && $('#pw-in').focus(), 60);
+  });
+}
+const needUnlock = msg => isLocked() ? askPw(msg) : Promise.resolve(true);
+function dlgSetPw() {
+  dlg(`<div class="dh">${S.settings.pw || window.ADMIN_PW ? 'Nouveau mot de passe' : 'Définir un mot de passe'}</div><div class="db"><div class="fm">
+    <p class="mut" style="margin:0">Ce mot de passe protège la modification des prix (prix unitaire CSPS / prix public et prix DRD). Notez-le et conservez-le : il ne peut pas être récupéré.</p>
+    <label>Mot de passe (4 caractères minimum)<input type="password" id="pw1" autocomplete="new-password"></label>
+    <label>Confirmer<input type="password" id="pw2" autocomplete="new-password"></label></div></div>`,
+    async () => {
+      const a = $('#pw1').value, b = $('#pw2').value;
+      if (a.length < 4) { toast('4 caractères minimum'); return false; }
+      if (a !== b) { toast('Les deux mots de passe sont différents'); return false; }
+      S.settings.pw = makePw(a); await saveSettings(); S.unlockedUntil = Date.now() + 10 * 60 * 1000; toast('Mot de passe enregistré'); viewSettings();
+    }, 'Enregistrer');
+}
+
 /* ---------- création de rapport ---------- */
 function newReport(csps, y, m) {
   const prev = S.reports.filter(r => r.csps.toUpperCase() === csps.toUpperCase()).sort((a, b) => (b.year * 12 + b.month) - (a.year * 12 + a.month));
@@ -364,19 +418,23 @@ function dlgProduct(id) {
   dlg(`<div class="dh">${id ? 'Modifier le produit' : 'Nouveau produit'}</div><div class="db"><div class="fm">
     <label>Désignation<input id="p-n" value="${esc(c.name)}"></label>
     <div class="fm g2"><label>Unité de comptage<input id="p-u" value="${esc(c.unit)}"></label><span></span>
-    <label>Prix unitaire en CSPS (F)<input id="p-pu" inputmode="decimal" value="${String(c.pu).replace('.', ',')}"></label>
-    <label>Prix DRD (F)<input id="p-drd" inputmode="decimal" value="${String(c.drd).replace('.', ',')}"></label></div>
+    <label>Prix unitaire en CSPS / prix public (F)${isLocked() ? ' 🔒' : ''}<input id="p-pu" inputmode="decimal" ${isLocked() ? 'readonly' : ''} value="${String(c.pu).replace('.', ',')}"></label>
+    <label>Prix DRD (F)${isLocked() ? ' 🔒' : ''}<input id="p-drd" inputmode="decimal" ${isLocked() ? 'readonly' : ''} value="${String(c.drd).replace('.', ',')}"></label></div>
+    ${isLocked() ? '<button class="btn sec sm" id="p-unlock" style="justify-self:start">🔒 Déverrouiller les prix (mot de passe)</button>' : (hasPw() ? '' : '<p class="mut" style="margin:0">Les prix ne sont protégés par aucun mot de passe : voir Réglages › Sécurité.</p>')}
     <label class="chk"><input type="checkbox" id="p-free" ${c.free ? 'checked' : ''}> Produit gratuit / de programme (prix = 0)</label>
     <label class="chk"><input type="checkbox" id="p-tr" ${c.tr ? 'checked' : ''}> Médicament traceur DMEG</label>
     ${id ? '<button class="btn bad sm" id="p-del" style="justify-self:start">Retirer du catalogue</button>' : ''}</div></div>`,
     async () => {
       const name = $('#p-n').value.trim(); if (!name) { toast('Désignation obligatoire'); return false; }
-      Object.assign(c, { name, unit: $('#p-u').value.trim(), pu: N(num($('#p-pu').value)), drd: N(num($('#p-drd').value)), free: $('#p-free').checked, tr: $('#p-tr').checked });
+      const prices = isLocked() ? { pu: c.pu, drd: c.drd } : { pu: N(num($('#p-pu').value)), drd: N(num($('#p-drd').value)) };
+      Object.assign(c, { name, unit: $('#p-u').value.trim(), ...prices, free: $('#p-free').checked, tr: $('#p-tr').checked });
       if (!id) S.catalog.push(c);
       await saveCatalog();
       if (S.rep) { const i = S.rep.items.findIndex(x => x.id === c.id); if (i >= 0) S.rep.items[i] = { ...c }; else S.rep.items.push({ ...c }); scheduleSave(); }
       toast('Produit enregistré'); if (S.rep) { S.tab === 'prod' ? renderList() : renderTab(); } else drawCatalog();
     });
+  const ul = $('#p-unlock');
+  if (ul) ul.onclick = async () => { if (await askPw('Saisissez le mot de passe pour modifier les prix')) { $('#p-pu').readOnly = false; $('#p-drd').readOnly = false; ul.remove(); toast('Prix déverrouillés (10 min)'); $('#p-pu').focus(); } };
   const del = $('#p-del');
   if (del) del.onclick = async () => { if (!confirm('Retirer ce produit du catalogue ? (les rapports déjà créés le conservent)')) return; S.catalog = S.catalog.filter(x => x.id !== id); await saveCatalog(); $('#dlg').close(); drawCatalog(); };
 }
@@ -388,9 +446,11 @@ function viewSettings() {
     <div class="card"><h2>En-tête des rapports</h2><div class="fm g2">
       <label>District sanitaire<input id="s-d" value="${esc(s.district)}"></label><label>Région<input id="s-r" value="${esc(s.region)}"></label>
       <label>Taux de rétrocession par défaut (%)<input id="s-rate" inputmode="decimal" value="${s.rate}"></label></div></div>
+    <div class="card"><h2>Sécurité des prix</h2><p class="mut" style="margin-top:0">${hasPw() ? (isLocked() ? '🔒 Les prix (CSPS / public et DRD) sont protégés par un mot de passe.' : '🔓 Prix déverrouillés pour quelques minutes.') : 'Aucun mot de passe : les prix peuvent être modifiés par tout utilisateur.'}</p>
+      <div class="row-btns" style="margin:0">${hasPw() ? `<button class="btn sec" data-act="pwchange">Changer le mot de passe</button>${s.pw ? '<button class="btn sec" data-act="pwremove">Retirer le mot de passe</button>' : ''}${!isLocked() ? '<button class="btn sec" data-act="pwlock">Verrouiller maintenant</button>' : ''}` : '<button class="btn" data-act="pwset">Définir un mot de passe</button>'}</div></div>
     <div class="card"><h2>Données</h2><p class="mut" style="margin-top:0">Les données restent sur cet appareil. Faites régulièrement une sauvegarde et transmettez-la au district (WhatsApp, e-mail, clé USB).</p>
       <div class="row-btns" style="margin:0"><button class="btn" data-act="backup">Sauvegarder tout (JSON)</button><button class="btn sec" data-act="import">Restaurer / importer</button><button class="btn sec" data-act="catalog">Catalogue des produits</button></div></div>
-    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.1 · fonctionne sans connexion</p></div>`;
+    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.2 · fonctionne sans connexion</p></div>`;
   ['s-d', 's-r', 's-rate'].forEach(i => $('#' + i).addEventListener('change', () => { s.district = $('#s-d').value.trim(); s.region = $('#s-r').value.trim(); s.rate = N(num($('#s-rate').value)); saveSettings(); toast('Enregistré'); }));
 }
 
@@ -540,12 +600,14 @@ function exportXlsx(r) {
 /* ---------- export PDF : SIGL + bilan + RMA ---------- */
 const pt = s => String(s == null ? '' : s).replace(/μ/g, 'µ').replace(/−/g, '-').replace(/[  ]/g, ' ').replace(/←/g, '<-').replace(/[^\u0000-ÿ‘’“”–—…€Œœ]/g, '');
 const pf = (n, d = 1) => (n == null || !isFinite(n)) ? '' : pt(fmt(n, d));
-function exportPdf(r, onlyFilled) {
+function exportPdf(r, onlyFilled, parts, tag) {
   const { jsPDF } = window.jspdf, doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const E = engine(r), t = totals(r), G = [15, 118, 110], title = `${r.csps} - ${MONTHS[r.month - 1]} ${r.year}`;
-  const sg = S.settings, num = { halign: 'right' };
-  const banner = (label) => {
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.text('MINISTERE DE LA SANTE', 10, 10); doc.text('BURKINA FASO', 287, 10, { align: 'right' });
+  const sg = S.settings, right = { halign: 'right' }, has = k => parts.includes(k);
+  let firstPage = true;
+  const newPage = label => {
+    if (!firstPage) doc.addPage(); firstPage = false;
+    doc.setTextColor(0); doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.text('MINISTERE DE LA SANTE', 10, 10); doc.text('BURKINA FASO', 287, 10, { align: 'right' });
     doc.setFont('helvetica', 'normal'); doc.text(pt('REGION DE ' + sg.region), 10, 14.5); doc.text('La Patrie ou la Mort, Nous Vaincrons!', 287, 14.5, { align: 'right' });
     doc.text('DIRECTION REGIONALE DE LA SANTE', 10, 19);
     doc.text(pt(`DISTRICT SANITAIRE DE : ${sg.district}      CSPS DE : ${r.csps}`), 10, 24);
@@ -553,66 +615,89 @@ function exportPdf(r, onlyFilled) {
     doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(pt(label), 148.5, 34, { align: 'center' });
   };
   const common = { theme: 'grid', styles: { font: 'helvetica', fontSize: 6.8, cellPadding: 1, lineColor: [150, 150, 150], lineWidth: 0.1, overflow: 'linebreak' }, headStyles: { fillColor: G, textColor: 255, halign: 'center', valign: 'middle', fontSize: 6.5 }, margin: { left: 10, right: 10, top: 14, bottom: 10 } };
+  const sign = y => doc.autoTable({ ...common, startY: y, head: [['', 'Nom et prénom', 'Fonction', 'N° de téléphone', 'Date', 'Signature']], body: [['Préparé par', r.sign.prep.nom, r.sign.prep.fonc, r.sign.prep.tel, '', ''], ['Approuvé par', r.sign.appr.nom, r.sign.appr.fonc, r.sign.appr.tel, '', ''], ['Reçu au District par', r.sign.recu.nom, r.sign.recu.fonc, r.sign.recu.tel, '', '']].map(a => a.map(pt)), styles: { ...common.styles, fontSize: 8.5, minCellHeight: 11, valign: 'middle' }, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 38 }, 5: { cellWidth: 50 } } });
+  const catRow = (label, n) => [{ content: pt(label), colSpan: n, styles: { fontStyle: 'bold', fillColor: [255, 236, 214], halign: 'left' } }];
+  // tableau de regroupement (SYNTHESE / RMA) : lignes de catégories + produits, avec filtre "renseignés"
+  const grouped = (entries, valFn, cols, widths, head) => {
+    const cl = 'CDEFGHIJKLM'.slice(0, cols), rows = []; let pend = null;
+    entries.forEach(e => {
+      if (e.label) { pend = catRow(e.label, cols + 2); if (!onlyFilled) { rows.push(pend); pend = null; } return; }
+      const hasT = e.t && e.t.length, vals = cl.split('').map(c => hasT ? valFn(e.r, c) : null);
+      if (onlyFilled && !vals.some(v => v)) return;
+      if (pend) { rows.push(pend); pend = null; }
+      rows.push([pt(e.a), pt(e.u || ''), ...vals.map(v => v == null ? '' : pf(v, 2))]);
+    });
+    doc.autoTable({ ...common, startY: 37, head: [head.map(pt)], body: rows, columnStyles: { 0: { cellWidth: widths[0] }, 1: { cellWidth: widths[1] }, ...Object.fromEntries(Array.from({ length: cols }, (_, i) => [i + 2, { ...right, cellWidth: widths[2] }])) } });
+    if (!rows.length) { doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.text('Aucun produit renseigné.', 10, 48); }
+    sign((rows.length ? doc.lastAutoTable.finalY : 48) + 8);
+  };
 
   // 1) SIGL
-  banner('RAPPORT DE GESTION ET DE COMMANDE DES PRODUITS DE SANTE (SIGL)');
-  const items = r.items.filter(it => !onlyFilled || (r.v[it.id] && Object.keys(r.v[it.id]).length));
-  const body = items.map(it => {
-    const v = r.v[it.id], c = calc(it, v, r.days), has = !!v && Object.keys(v).length > 0, g = k => v && v[k] != null ? pf(v[k], 2) : '';
-    return [it.name, it.unit, g('deb'), g('rec'), has ? pf(c.cons, 2) : '', g('per'), g('aut'), g('ajm'), g('ajp'), g('fin'), g('rup'), has ? pf(c.adj, 1) : '', has ? pf(c.cmd, 1) : '', it.pu ? pf(it.pu, 2) : '', has && it.pu ? pf(c.Q, 0) : ''].map(pt).concat([it.free, has && c.cons < 0]);
-  });
-  doc.autoTable({
-    ...common, startY: 37,
-    head: [['Désignation', 'Unité', 'Début (A)', 'Reçu (B)', 'Consommé (C)', 'Périmé (D)', 'Autres pertes (E)', 'Ajust. - (F-)', 'Ajust. + (F+)', 'Stock fin (G)', 'Jours rupture (H)', 'Conso. ajustée (I)', 'À commander (J)', 'Prix unit. CSPS', 'Vente prix public'].map(pt)],
-    body: body.map(b => b.slice(0, 15)),
-    columnStyles: { 0: { cellWidth: 70 }, 1: { cellWidth: 18 }, ...Object.fromEntries(Array.from({ length: 13 }, (_, i) => [i + 2, { ...num, cellWidth: 14.1 }])) },
-    didParseCell: d => { if (d.section === 'body') { const f = body[d.row.index]; if (f[15] && d.column.index === 0) d.cell.styles.fillColor = [255, 236, 214]; if (f[16] && d.column.index === 4) d.cell.styles.textColor = [185, 28, 28]; } },
-    didDrawPage: () => { }
-  });
-  if (!body.length) { doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.text('Aucun produit renseigné.', 10, 48); }
+  if (has('sigl')) {
+    newPage('RAPPORT DE GESTION ET DE COMMANDE DES PRODUITS DE SANTE (SIGL)');
+    const items = r.items.filter(it => !onlyFilled || (r.v[it.id] && Object.keys(r.v[it.id]).length));
+    const body = items.map(it => {
+      const v = r.v[it.id], c = calc(it, v, r.days), hv = !!v && Object.keys(v).length > 0, g = k => v && v[k] != null ? pf(v[k], 2) : '';
+      return [it.name, it.unit, g('deb'), g('rec'), hv ? pf(c.cons, 2) : '', g('per'), g('aut'), g('ajm'), g('ajp'), g('fin'), g('rup'), hv ? pf(c.adj, 1) : '', hv ? pf(c.cmd, 1) : '', it.pu ? pf(it.pu, 2) : '', hv && it.pu ? pf(c.Q, 0) : ''].map(pt).concat([it.free, hv && c.cons < 0]);
+    });
+    doc.autoTable({
+      ...common, startY: 37,
+      head: [['Désignation', 'Unité', 'Début (A)', 'Reçu (B)', 'Consommé (C)', 'Périmé (D)', 'Autres pertes (E)', 'Ajust. - (F-)', 'Ajust. + (F+)', 'Stock fin (G)', 'Jours rupture (H)', 'Conso. ajustée (I)', 'À commander (J)', 'Prix unit. CSPS', 'Vente prix public'].map(pt)],
+      body: body.map(b => b.slice(0, 15)),
+      columnStyles: { 0: { cellWidth: 70 }, 1: { cellWidth: 18 }, ...Object.fromEntries(Array.from({ length: 13 }, (_, i) => [i + 2, { ...right, cellWidth: 14.1 }])) },
+      didParseCell: d => { if (d.section === 'body') { const f = body[d.row.index]; if (f[15] && d.column.index === 0) d.cell.styles.fillColor = [255, 236, 214]; if (f[16] && d.column.index === 4) d.cell.styles.textColor = [185, 28, 28]; } }
+    });
+    if (!body.length) { doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.text('Aucun produit renseigné.', 10, 48); }
+  }
 
   // 2) Bilan
-  doc.addPage(); banner('BILAN DU MOIS'); const fin = r.fin, ok = t.ratio != null && t.ratio >= 0.98 && t.ratio <= 1.02;
-  const two = (rows, y, x, w) => doc.autoTable({ ...common, startY: y, showHead: false, body: rows.map(a => a.map(pt)), tableWidth: w, margin: { left: x, right: 297 - x - w, top: 14, bottom: 10 }, columnStyles: { 0: { cellWidth: w - 34 }, 1: { halign: 'right', fontStyle: 'bold', cellWidth: 34 } }, styles: { ...common.styles, fontSize: 8.2, cellPadding: 1.5 } });
-  two([['Valeur du stock au début du mois (prix public)', pf(t.R, 0) + ' F'], ['Valeur des MEG reçues (prix public)', pf(t.S, 0) + ' F'], ['Total vente du mois au prix public (DMEG)', pf(t.Q, 0) + ' F'], ['Total vente du mois au prix DRD', pf(t.P, 0) + ' F'], ['Valeur du stock en fin de mois (prix public)', pf(t.T, 0) + ' F'], ['Valeur du stock périmé / cassé (prix public)', pf(t.U, 0) + ' F']], 40, 10, 136);
-  const yL = doc.lastAutoTable.finalY;
-  two([['Taux de rupture des traceurs DMEG', t.tauxRup == null ? '-' : pf(t.tauxRup, 1) + ' %'], ['Durée moyenne de rupture des traceurs (jours)', t.durRup == null ? '-' : pf(t.durRup, 1)], ['Marge théorique du mois', pf(t.marge, 0) + ' F'], [`Rétrocession maximum sur recettes en liquidité (${pf(N(fin.rate), 2)} %)`, pf(t.retro, 0) + ' F']], yL + 5, 10, 136);
-  const yL2 = doc.lastAutoTable.finalY;
-  two([['MEG sorties pour la gratuité des soins et la PF', pf(N(fin.grat), 0) + ' F'], ['MEG sorties pour le RAMU', pf(N(fin.ramu), 0) + ' F'], ['MEG sorties pour le fonctionnement du CSPS', pf(N(fin.fonct), 0) + ' F'], ['Caisse du gérant non encore versé au trésorier', pf(N(fin.caisse), 0) + ' F'], ['Versements effectués au trésorier par le gérant', pf(N(fin.verse), 0) + ' F']], 40, 151, 136);
-  two([["Chiffre d'affaires réel (CAR)", pf(t.car, 0) + ' F'], ["Chiffre d'affaires théorique (CAT)", pf(t.cat, 0) + ' F'], ['CAR - CAT', pf(t.ecart, 0) + ' F'], ['CAR / CAT (norme 0,98 - 1,02)', t.ratio == null ? '-' : pf(t.ratio, 3) + (ok ? '  (conforme)' : '  (hors norme)')]], doc.lastAutoTable.finalY + 5, 151, 136);
-  const yEnd = Math.max(yL2, doc.lastAutoTable.finalY);
-  const sign = (y) => doc.autoTable({ ...common, startY: y, head: [['', 'Nom et prénom', 'Fonction', 'N° de téléphone', 'Date', 'Signature']], body: [['Préparé par', r.sign.prep.nom, r.sign.prep.fonc, r.sign.prep.tel, '', ''], ['Approuvé par', r.sign.appr.nom, r.sign.appr.fonc, r.sign.appr.tel, '', ''], ['Reçu au District par', r.sign.recu.nom, r.sign.recu.fonc, r.sign.recu.tel, '', '']].map(a => a.map(pt)), styles: { ...common.styles, fontSize: 8.5, minCellHeight: 11, valign: 'middle' }, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 38 }, 5: { cellWidth: 50 } } });
-  sign(yEnd + 10);
+  if (has('bilan')) {
+    newPage('BILAN DU MOIS'); const fin = r.fin, ok = t.ratio != null && t.ratio >= 0.98 && t.ratio <= 1.02;
+    const two = (rows, y, x, w) => doc.autoTable({ ...common, startY: y, showHead: false, body: rows.map(a => a.map(pt)), tableWidth: w, margin: { left: x, right: 297 - x - w, top: 14, bottom: 10 }, columnStyles: { 0: { cellWidth: w - 34 }, 1: { halign: 'right', fontStyle: 'bold', cellWidth: 34 } }, styles: { ...common.styles, fontSize: 8.2, cellPadding: 1.5 } });
+    two([['Valeur du stock au début du mois (prix public)', pf(t.R, 0) + ' F'], ['Valeur des MEG reçues (prix public)', pf(t.S, 0) + ' F'], ['Total vente du mois au prix public (DMEG)', pf(t.Q, 0) + ' F'], ['Total vente du mois au prix DRD', pf(t.P, 0) + ' F'], ['Valeur du stock en fin de mois (prix public)', pf(t.T, 0) + ' F'], ['Valeur du stock périmé / cassé (prix public)', pf(t.U, 0) + ' F']], 40, 10, 136);
+    const yL = doc.lastAutoTable.finalY;
+    two([['Taux de rupture des traceurs DMEG', t.tauxRup == null ? '-' : pf(t.tauxRup, 1) + ' %'], ['Durée moyenne de rupture des traceurs (jours)', t.durRup == null ? '-' : pf(t.durRup, 1)], ['Marge théorique du mois', pf(t.marge, 0) + ' F'], [`Rétrocession maximum sur recettes en liquidité (${pf(N(fin.rate), 2)} %)`, pf(t.retro, 0) + ' F']], yL + 5, 10, 136);
+    const yL2 = doc.lastAutoTable.finalY;
+    two([['MEG sorties pour la gratuité des soins et la PF', pf(N(fin.grat), 0) + ' F'], ['MEG sorties pour le RAMU', pf(N(fin.ramu), 0) + ' F'], ['MEG sorties pour le fonctionnement du CSPS', pf(N(fin.fonct), 0) + ' F'], ['Caisse du gérant non encore versé au trésorier', pf(N(fin.caisse), 0) + ' F'], ['Versements effectués au trésorier par le gérant', pf(N(fin.verse), 0) + ' F']], 40, 151, 136);
+    two([["Chiffre d'affaires réel (CAR)", pf(t.car, 0) + ' F'], ["Chiffre d'affaires théorique (CAT)", pf(t.cat, 0) + ' F'], ['CAR - CAT', pf(t.ecart, 0) + ' F'], ['CAR / CAT (norme 0,98 - 1,02)', t.ratio == null ? '-' : pf(t.ratio, 3) + (ok ? '  (conforme)' : '  (hors norme)')]], doc.lastAutoTable.finalY + 5, 151, 136);
+    sign(Math.max(yL2, doc.lastAutoTable.finalY) + 10);
+  }
 
-  // 3) RMA
-  doc.addPage(); banner(`RMA - RAPPORT MENSUEL D'ACTIVITES DES MEG - FORMATION SANITAIRE : ${r.csps}`);
-  const rb = [];
-  (window.MAPS ? window.MAPS.rma : []).forEach(e => {
-    if (e.label) { rb.push([{ content: pt(e.label), colSpan: 12, styles: { fontStyle: 'bold', fillColor: [255, 236, 214], halign: 'left' } }]); return; }
-    const has = e.t && e.t.length, c = col => has ? pf(E.rma(e.r, col), 2) : '';
-    rb.push([pt(e.a), pt(e.u || ''), ...'CDEFGHIJKL'.split('').map(c)]);
-  });
-  doc.autoTable({ ...common, startY: 37, head: [['Désignation', 'Unité', 'Qtité dispo en début (A)', 'Quantité reçue (B)', 'Quantité consommée (C)', 'Quantité périmée (D)', 'Autres pertes (E)', 'Ajust. - (F-)', 'Ajust. + (F+)', 'Qtité disponible (G)', 'Jours de rupture (H)', 'Quantité à commander (I)'].map(pt)], body: rb, columnStyles: { 0: { cellWidth: 82 }, 1: { cellWidth: 24 }, ...Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i + 2, { ...num, cellWidth: 17.1 }])) } });
-  sign(doc.lastAutoTable.finalY + 8);
+  // 3) SYNTHESE
+  if (has('syn')) {
+    newPage('SYNTHESE PAR PROGRAMME - RAPPORT DE GESTION ET DE COMMANDE DES PRODUITS DE SANTE');
+    grouped(window.MAPS ? window.MAPS.syn : [], (n, c) => E.syn(n, c), 11, [70, 18, 17.1],
+      ['Désignation', 'Unité', 'Début (A)', 'Reçu (B)', 'Consommé (C)', 'Périmé (D)', 'Autres pertes (E)', 'Ajust. - (F-)', 'Ajust. + (F+)', 'Stock fin (G)', 'Jours rupture (H)', 'Conso. ajustée (I)', 'À commander (J)']);
+  }
 
-  // pieds de page
+  // 4) RMA
+  if (has('rma')) {
+    newPage(`RMA - RAPPORT MENSUEL D'ACTIVITES DES MEG - FORMATION SANITAIRE : ${r.csps}`);
+    grouped(window.MAPS ? window.MAPS.rma : [], (n, c) => E.rma(n, c), 10, [82, 24, 17.1],
+      ['Désignation', 'Unité', 'Qtité dispo en début (A)', 'Quantité reçue (B)', 'Quantité consommée (C)', 'Quantité périmée (D)', 'Autres pertes (E)', 'Ajust. - (F-)', 'Ajust. + (F+)', 'Qtité disponible (G)', 'Jours de rupture (H)', 'Quantité à commander (I)']);
+  }
+
   const nP = doc.getNumberOfPages();
   for (let i = 1; i <= nP; i++) { doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(110); doc.text(pt(`SIGL Saisie MEG - ${title}`), 10, 205); doc.text(`Page ${i} / ${nP}`, 287, 205, { align: 'right' }); }
-  saveFile(`SIGL_${safe(r.csps)}_${r.year}-${pad2(r.month)}.pdf`, doc.output('blob'));
+  saveFile(`${tag}_${safe(r.csps)}_${r.year}-${pad2(r.month)}.pdf`, doc.output('blob'));
 }
 
 function dlgExport() {
   const d = $('#dlg');
   d.innerHTML = `<div class="dh">Exporter le rapport</div><div class="db"><div class="fm">
     <button class="btn" data-ex="xlsx">📗 Excel — 3 feuilles : SIGL, SYNTHESE, RMA</button>
-    <button class="btn" data-ex="pdf">📕 PDF — SIGL + bilan + RMA</button>
-    <label class="chk"><input type="checkbox" id="ex-filled" ${S.pdfFilled === false ? '' : 'checked'}> PDF : seulement les produits renseignés</label>
+    <div class="mut" style="font-weight:700;margin-top:4px">PDF (A4 paysage)</div>
+    <button class="btn sec" data-ex="pdf:sigl,bilan:SIGL">📕 SIGL + bilan</button>
+    <button class="btn sec" data-ex="pdf:syn:SYNTHESE">📕 SYNTHESE</button>
+    <button class="btn sec" data-ex="pdf:rma:RMA">📕 RMA</button>
+    <button class="btn sec" data-ex="pdf:sigl,bilan,syn,rma:COMPLET">📕 Tout en un seul PDF</button>
+    <label class="chk"><input type="checkbox" id="ex-filled" ${S.pdfFilled === false ? '' : 'checked'}> PDF : seulement les lignes renseignées</label>
     <p class="mut" style="margin:0">Excel : les formules sont conservées, les trois feuilles sont liées comme dans votre classeur.</p></div></div>
     <div class="df"><button class="btn sec" data-x>Fermer</button></div>`;
   d.querySelector('[data-x]').onclick = () => d.close();
   d.querySelectorAll('[data-ex]').forEach(b => b.onclick = async () => {
-    S.pdfFilled = $('#ex-filled').checked; d.close(); await saveNow();
-    try { b.dataset.ex === 'xlsx' ? exportXlsx(S.rep) : exportPdf(S.rep, S.pdfFilled); } catch (e) { console.error(e); alert("Erreur pendant l'export : " + (e && e.message || e)); }
+    S.pdfFilled = $('#ex-filled').checked; const [k, parts, tag] = b.dataset.ex.split(':'); d.close(); await saveNow();
+    try { k === 'xlsx' ? exportXlsx(S.rep) : exportPdf(S.rep, S.pdfFilled, parts.split(','), tag); } catch (e) { console.error(e); alert("Erreur pendant l'export : " + (e && e.message || e)); }
   });
   d.showModal();
 }
@@ -621,8 +706,11 @@ async function importFile(file) {
   try {
     const d = JSON.parse(await file.text());
     if (d.app !== 'sigl-meg') throw new Error('format');
-    let n = 0;
+    let n = 0, lock = isLocked();
+    if (d.catalog && d.full && lock && !(await askPw('Mot de passe requis pour remplacer le catalogue et les prix'))) { d.full = false; }
+    lock = isLocked();
     for (const r of d.reports || []) {
+      if (lock) (r.items || []).forEach(it => { const l = S.catalog.find(x => x.id === it.id); if (l) { it.pu = l.pu; it.drd = l.drd; } });
       const cur = S.reports.find(x => x.id === r.id);
       if (!cur || (r.updated || 0) > (cur.updated || 0)) { await DB.set('report:' + r.id, r); n++; }
     }
@@ -645,6 +733,10 @@ document.addEventListener('click', async e => {
     case 'back': return history.length > 1 ? history.back() : go('/');
     case 'new': return dlgNew();
     case 'import': return pickFile();
+    case 'pwset': return dlgSetPw();
+    case 'pwchange': if (await needUnlock('Mot de passe actuel')) dlgSetPw(); return;
+    case 'pwremove': if (await askPw('Mot de passe actuel') && confirm('Retirer le mot de passe ? Les prix pourront de nouveau être modifiés par tous.')) { delete S.settings.pw; await saveSettings(); viewSettings(); } return;
+    case 'pwlock': S.unlockedUntil = 0; return viewSettings();
     case 'catalog': return go('/catalogue');
     case 'settings': return go('/reglages');
     case 'addprod': return dlgProduct();

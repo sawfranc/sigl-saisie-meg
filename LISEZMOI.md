@@ -25,3 +25,9 @@ En local (PC avec Node 22 + JDK 21 + Android Studio) : `npm install && npm run a
 - Bilan : caisse, sorties, CAR/CAT (norme 0,98 – 1,02), indicateurs de rupture.
 - Exporter : Excel (3 feuilles SIGL, SYNTHESE, RMA, formules conservées) ou PDF (SIGL + bilan + RMA, A4 paysage). Sauvegarde JSON : à envoyer au district, « Importer » pour les regrouper.
 - Catalogue (💊) : modifier prix CSPS / DRD, ajouter un produit, marquer les 25 traceurs.
+
+## Mot de passe sur les prix (prix CSPS / public et prix DRD)
+- Réglages > Sécurité des prix > « Définir un mot de passe » (à faire sur chaque appareil, avant de le remettre au gérant). Sans mot de passe, les prix restent modifiables par tous.
+- Ensuite, les prix sont en lecture seule (🔒) dans le catalogue et dans la fiche produit ✎ : il faut le mot de passe pour les modifier (déverrouillage valable 10 minutes). La restauration d'un catalogue depuis une sauvegarde le demande aussi, et les rapports importés reprennent les prix du catalogue local.
+- Le mot de passe ne peut pas être récupéré : conservez-le. Pour le fixer d'avance sur tous les appareils : `node tools/mdp.js "MonMotDePasse" > www/config.js`, puis reconstruire (GitHub Actions).
+- Limite : la protection est dans l'application ; elle n'empêche pas de modifier un fichier Excel déjà exporté.
