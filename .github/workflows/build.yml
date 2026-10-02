@@ -3,6 +3,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main, master]
+permissions:
+  contents: write
 jobs:
   android:
     runs-on: ubuntu-latest
@@ -32,3 +34,20 @@ jobs:
           name: SIGL-Saisie-MEG-Windows
           path: |
             dist/*.exe
+  publier:
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: fichiers }
+      - run: |
+          mkdir sortie
+          cp fichiers/SIGL-Saisie-MEG-APK/app-debug.apk sortie/SIGL-Saisie-MEG.apk
+          cp fichiers/SIGL-Saisie-MEG-Windows/*.exe sortie/
+          ls -la sortie
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: SIGL Saisie MEG v1.0.${{ github.run_number }}
+          body: "APK Android (SIGL-Saisie-MEG.apk) et Windows (installateur Setup + version portable)."
+          files: sortie/*
