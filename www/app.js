@@ -181,7 +181,7 @@ function dlgNew() {
 function viewReport() {
   const r = S.rep;
   $('#app').innerHTML = topbar(`${r.csps}`, `${MONTHS[r.month - 1]} ${r.year} · ${r.days} jours`, true,
-    `<button class="ib" data-act="xlsx" title="Exporter en Excel">⬇ Excel</button>`) +
+    `<button class="ib" data-act="export" title="Exporter en Excel ou PDF">⬇ Exporter</button>`) +
     `<div id="pane"></div>
     <nav class="tabs"><button data-tab="prod"><span>💊</span>Produits</button><button data-tab="bilan"><span>📊</span>Bilan</button><button data-tab="infos"><span>📝</span>Infos</button></nav>`;
   renderTab();
@@ -326,7 +326,7 @@ function paneInfos() {
       <p class="mut" style="margin-bottom:0">Nombre de jours du mois : <b>${r.days}</b> · District : ${esc(S.settings.district)}</p></div>
     ${sg('prep', 'Préparé par (gérant)')}${sg('appr', 'Approuvé par (ICP)')}${sg('recu', 'Reçu au District par')}
     <div class="card"><h2>Actions</h2><div class="row-btns" style="margin:0">
-      <button class="btn" data-act="xlsx">⬇ Exporter en Excel</button>
+      <button class="btn" data-act="export">⬇ Exporter (Excel / PDF)</button>
       <button class="btn sec" data-act="json">Sauvegarde (JSON)</button>
       <button class="btn sec" data-act="carry">Reprendre les stocks du mois précédent</button>
       <button class="btn sec" data-act="prices">Mettre à jour les prix depuis le catalogue</button>
@@ -390,7 +390,7 @@ function viewSettings() {
       <label>Taux de rétrocession par défaut (%)<input id="s-rate" inputmode="decimal" value="${s.rate}"></label></div></div>
     <div class="card"><h2>Données</h2><p class="mut" style="margin-top:0">Les données restent sur cet appareil. Faites régulièrement une sauvegarde et transmettez-la au district (WhatsApp, e-mail, clé USB).</p>
       <div class="row-btns" style="margin:0"><button class="btn" data-act="backup">Sauvegarder tout (JSON)</button><button class="btn sec" data-act="import">Restaurer / importer</button><button class="btn sec" data-act="catalog">Catalogue des produits</button></div></div>
-    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.0 · fonctionne sans connexion</p></div>`;
+    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.1 · fonctionne sans connexion</p></div>`;
   ['s-d', 's-r', 's-rate'].forEach(i => $('#' + i).addEventListener('change', () => { s.district = $('#s-d').value.trim(); s.region = $('#s-r').value.trim(); s.rate = N(num($('#s-rate').value)); saveSettings(); toast('Enregistré'); }));
 }
 
@@ -411,64 +411,210 @@ async function saveFile(name, data, mime) {
 }
 const safe = s => s.replace(/[^\w\-]+/g, '_');
 
+/* ---------- moteur de valeurs : SIGL -> SYNTHESE -> RMA (mêmes liens que le classeur) ---------- */
+const SYN = {}, RMAM = {};
+(window.MAPS ? window.MAPS.syn : []).forEach(e => SYN[e.r] = e);
+(window.MAPS ? window.MAPS.rma : []).forEach(e => RMAM[e.r] = e);
+function placeItems(r) {
+  const rowOf = {}, used = new Set(), extras = [];
+  for (const it of r.items) {
+    const m = /^p(\d{1,3})$/.exec(it.id), n = m ? +m[1] : 0;
+    if (n >= 13 && n <= 454 && !used.has(n)) { rowOf[it.id] = n; used.add(n); } else extras.push(it);
+  }
+  let nx = 436; for (const it of extras) { while (used.has(nx)) nx++; rowOf[it.id] = nx; used.add(nx); nx++; }
+  const byRow = {}; r.items.forEach(it => byRow[rowOf[it.id]] = it);
+  const last = Math.max(454, ...used);
+  return { rowOf, byRow, last, tot: last + 1 };
+}
+function engine(r) {
+  const P = placeItems(r), memo = {};
+  const key = { C: 'deb', D: 'rec', F: 'per', G: 'aut', H: 'ajm', I: 'ajp', J: 'fin', K: 'rup' };
+  const sigl = (row, col) => {
+    const it = P.byRow[row]; if (!it) return 0;
+    const v = r.v[it.id] || {}, c = calc(it, v, r.days);
+    if (col === 'E') return c.cons; if (col === 'L') return c.adj; if (col === 'M') return c.cmd;
+    return N(v[key[col]]);
+  };
+  const src = (t, g, col) => g === 'G' ? sigl(t, col) : (t <= 163 ? syn(t, col) : sigl(t - 152, col));
+  const syn = (n, col) => { const k = 's' + n + col; if (k in memo) return memo[k]; const e = SYN[n]; let s = 0; if (e && e.t) e.t.forEach((t, i) => s += src(t, e.g[i], col)); return memo[k] = s; };
+  const rma = (n, col) => { const e = RMAM[n]; let s = 0; if (e && e.t) e.t.forEach(t => s += src(t, 'S', col === 'L' ? 'M' : col)); return s; };
+  const refText = (t, g, col, local) => g === 'G' ? `SIGL!${col}${t}` : (t <= 163 ? (local ? `${col}${t}` : `SYNTHESE!${col}${t}`) : `SIGL!${col}${t - 152}`);
+  return { P, sigl, syn, rma, refText };
+}
+
+/* ---------- export Excel : 3 feuilles SIGL + SYNTHESE + RMA ---------- */
 function exportXlsx(r) {
-  const X = XLSX, ws = {}, merges = [], t = totals(r), first = 10, n = r.items.length, last = first + n - 1, tot = last + 1;
-  const A = (c, row) => X.utils.encode_cell({ c, r: row - 1 });
+  const X = XLSX, E = engine(r), t = totals(r), P = E.P, first = 13, tot = P.tot, last = tot - 1, n = r.items.length;
   const thin = { style: 'thin', color: { rgb: '999999' } }, bd = { top: thin, bottom: thin, left: thin, right: thin };
-  const put = (c, row, v, o = {}) => { if (v == null || v === '') { if (!o.s && !o.f) return; v = ''; } ws[A(c, row)] = Object.assign({ v, t: typeof v === 'number' ? 'n' : 's' }, o); };
   const hs = { font: { bold: true, sz: 10 }, fill: { fgColor: { rgb: 'D9EAD3' } }, alignment: { wrapText: true, vertical: 'center', horizontal: 'center' }, border: bd };
-  const bold = { font: { bold: true } };
-  put(0, 1, 'MINISTERE DE LA SANTE', { s: bold }); put(10, 1, 'BURKINA FASO', { s: bold });
-  put(0, 2, 'REGION DE ' + S.settings.region); put(10, 2, 'La Patrie ou la Mort, Nous Vaincrons!');
-  put(0, 3, 'DIRECTION REGIONALE DE LA SANTE');
-  put(0, 4, 'DISTRICT SANITAIRE DE:'); put(1, 4, S.settings.district, { s: bold }); put(10, 4, 'Nombre de jours du mois :'); put(13, 4, r.days, { s: bold });
-  put(0, 5, 'CSPS DE :'); put(1, 5, r.csps, { s: bold });
-  put(1, 6, 'ANNEE'); put(2, 6, r.year, { s: bold }); put(4, 6, 'MOIS DE'); put(5, 6, MONTHS[r.month - 1], { s: bold });
-  const dd = r.date ? r.date.split('-').reverse().join(' / ') : ''; put(10, 6, 'Date:'); put(11, 6, dd);
-  put(0, 7, 'RAPPORT DE GESTION ET DE COMMANDE DES PRODUITS DE SANTE', { s: { font: { bold: true, sz: 13 } } });
+  const bold = { font: { bold: true } }, catS = { font: { bold: true }, fill: { fgColor: { rgb: 'FABF8F' } }, border: bd };
+  const NUM = { border: bd, numFmt: '#,##0.##' };
+  const sheet = () => { const ws = {}; return { ws, put(c, row, v, o = {}) { if ((v == null || v === '') && !o.s && !o.f) return; if (v == null) v = ''; ws[X.utils.encode_cell({ c, r: row - 1 })] = Object.assign({ v, t: typeof v === 'number' ? 'n' : 's' }, o); } }; };
+  const finish = (ws, maxc, maxr, cols, extra) => { ws['!ref'] = X.utils.encode_range({ s: { c: 0, r: 0 }, e: { c: maxc, r: maxr } }); ws['!cols'] = cols; Object.assign(ws, extra || {}); return ws; };
+  const dd = r.date ? r.date.split('-').reverse().join(' / ') : '';
+  const head = (S, mid) => {
+    S.put(0, 1, 'MINISTERE DE LA SANTE', { s: bold }); S.put(10, 1, 'BURKINA FASO', { s: bold });
+    S.put(0, 2, 'REGION DE ' + S0.region); S.put(10, 2, 'La Patrie ou la Mort, Nous Vaincrons!');
+    S.put(0, 3, 'DIRECTION REGIONALE DE LA SANTE');
+    S.put(0, 4, 'DISTRICT SANITAIRE DE:'); S.put(1, 4, S0.district, { s: bold }); S.put(10, 4, 'Nombre de jours du mois :'); S.put(13, 4, r.days, { s: bold });
+    S.put(0, 5, 'CSPS DE :'); S.put(1, 5, r.csps, { s: bold });
+    S.put(1, 6, 'ANNEE'); S.put(2, 6, r.year, { s: bold }); S.put(4, 6, 'MOIS DE'); S.put(5, 6, MONTHS[r.month - 1], { s: bold }); S.put(10, 6, 'Date:'); S.put(11, 6, dd);
+    S.put(0, 7, 'RAPPORT DE GESTION ET DE COMMANDE DES PRODUITS DE SANTE', { s: { font: { bold: true, sz: 13 } } });
+  };
+  const S0 = S.settings;
   const H = ['Désignation', 'Unité de comptage', 'Quantité disponible et utilisable en début de mois', 'Quantité reçue au cours du mois', 'Quantité consommée au cours du mois', 'Quantité périmée au cours du mois', 'Autres pertes au cours du mois', 'Ajustements (−) au cours du mois', 'Ajustements (+) au cours du mois', 'Quantité disponible et utilisable en fin de mois', 'Nbre de jours de rupture au cours du mois', 'Quantité consommée ajustée du mois', 'Quantité à commander', 'Prix unitaire en CSPS', 'Prix DRD', 'Total vente du mois au prix DRD', 'Total vente du mois aux prix public (DMEG)', 'Valeur stock au début du mois aux prix public (DMEG)', 'Valeur des MEG commandée aux prix public (DMEG)', 'Valeur stock à la fin du mois aux prix public (DMEG)', 'Valeur stock périmé / cassé aux prix public (DMEG)', 'Traceur (1 = oui)'];
-  H.forEach((h, c) => put(c, 8, h, { s: hs }));
-  ['', '', 'A', 'B', 'C', 'D', 'E', 'F-', 'F+', 'G', 'H', 'I', 'J'].forEach((l, c) => put(c, 9, l, { s: hs }));
-  const nf = { numFmt: '#,##0.##' }, fr = { fill: { fgColor: { rgb: 'FABF8F' } } };
-  r.items.forEach((it, i) => {
-    const row = first + i, v = r.v[it.id] || {}, c = calc(it, v, r.days);
-    put(0, row, it.name, { s: Object.assign({ border: bd }, it.free ? { fill: fr.fill } : {}) }); put(1, row, it.unit, { s: { border: bd } });
-    const inp = { s: { border: bd, numFmt: '#,##0.##' } };
-    [['deb', 2], ['rec', 3], ['per', 5], ['aut', 6], ['ajm', 7], ['ajp', 8], ['fin', 9], ['rup', 10]].forEach(([k, col]) => { if (v[k] != null) put(col, row, v[k], inp); else put(col, row, '', { s: { border: bd } }); });
-    const F = (col, f, val) => put(col, row, val, { f, s: { border: bd, numFmt: '#,##0.##' } });
+  const LET = ['', '', 'A', 'B', 'C', 'D', 'E', 'F-', 'F+', 'G', 'H', 'I', 'J'];
+  const COLS = 'ABCDEFGHIJKLMNOPQRSTUV';
+
+  /* ===== feuille SIGL ===== */
+  const G = sheet(), g = G.ws; head(G, true);
+  H.forEach((h, c) => { G.put(c, 8, h, { s: hs }); G.put(c, 12, h, { s: hs }); });
+  LET.forEach((l, c) => G.put(c, 10, l, { s: hs }));
+  G.put(0, 11, 'INVENTAIRE DES MEDICAMENTS ET CONSOMMABLES', { s: bold });
+  const frFill = { fgColor: { rgb: 'FABF8F' } };
+  r.items.forEach(it => {
+    const row = P.rowOf[it.id], v = r.v[it.id] || {}, c = calc(it, v, r.days);
+    G.put(0, row, it.name, { s: Object.assign({ border: bd }, it.free ? { fill: frFill } : {}) }); G.put(1, row, it.unit, { s: { border: bd } });
+    [['deb', 2], ['rec', 3], ['per', 5], ['aut', 6], ['ajm', 7], ['ajp', 8], ['fin', 9], ['rup', 10]].forEach(([k, col]) => G.put(col, row, v[k] != null ? v[k] : '', { s: NUM }));
+    const F = (col, f, val) => G.put(col, row, val, { f, s: NUM });
     F(4, `C${row}+D${row}+I${row}-F${row}-G${row}-H${row}-J${row}`, c.cons);
     F(11, `IF($N$4-K${row}>0,E${row}/($N$4-K${row})*$N$4,E${row})`, c.adj);
     F(12, `IF(L${row}*2-J${row}>=0,L${row}*2-J${row},0)`, c.cmd);
-    put(13, row, N(it.pu), { s: { border: bd, numFmt: '#,##0.##' } }); put(14, row, N(it.drd), { s: { border: bd, numFmt: '#,##0.##' } });
+    G.put(13, row, N(it.pu), { s: NUM }); G.put(14, row, N(it.drd), { s: NUM });
     F(15, `E${row}*O${row}`, c.P); F(16, `E${row}*N${row}`, c.Q); F(17, `C${row}*N${row}`, c.R); F(18, `D${row}*N${row}`, c.S); F(19, `J${row}*N${row}`, c.T); F(20, `(F${row}+G${row})*N${row}`, c.U);
-    if (it.tr) put(21, row, 1, { s: { border: bd } });
+    if (it.tr) G.put(21, row, 1, { s: { border: bd } });
   });
-  put(0, tot, 'TOTAL', { s: bold });
-  [['D', 3, t.rec], ['P', 15, t.P], ['Q', 16, t.Q], ['R', 17, t.R], ['S', 18, t.S], ['T', 19, t.T], ['U', 20, t.U]].forEach(([L, c, val]) => put(c, tot, val, { f: `SUM(${L}${first}:${L}${last})`, s: { font: { bold: true }, numFmt: '#,##0' } }));
+  G.put(0, tot, 'TOTAL', { s: bold });
+  [['D', 3, t.rec], ['P', 15, t.P], ['Q', 16, t.Q], ['R', 17, t.R], ['S', 18, t.S], ['T', 19, t.T], ['U', 20, t.U]].forEach(([L, c, val]) => G.put(c, tot, val, { f: `SUM(${L}${first}:${L}${last})`, s: { font: { bold: true }, numFmt: '#,##0' } }));
   let row = tot + 1;
-  const line = (label, val, f, extra) => { put(0, row, label, extra && extra.bold ? { s: bold } : {}); if (val !== undefined) put(2, row, val, { f, s: { numFmt: '#,##0.###' } }); return row++; };
-  const hasTr = t.nTr > 0, V = `V${first}:V${last}`, K = `K${first}:K${last}`;
-  line("Taux de rupture des médicaments traceurs DMEG (100 x nbre de traceurs en rupture / nbre de traceurs)", hasTr ? t.tauxRup : '', `IF(SUM(${V})=0,"",100*COUNTIFS(${V},1,${K},">0")/SUM(${V}))`);
-  line("Durée moyenne de rupture des médicaments traceurs DMEG (somme des jours de rupture / nbre de traceurs)", hasTr ? t.durRup : '', `IF(SUM(${V})=0,"",SUMIF(${V},1,${K})/SUM(${V}))`);
-  const f = r.fin; const R = {};
-  [['grat', 'MEG sorties pour la gratuité des soins et la PF'], ['ramu', 'MEG sorties pour le RAMU'], ['fonct', 'MEG sortie pour le fonctionnement du CSPS'], ['caisse', 'Caisse du gérant non encore versé au trésorier'], ['verse', 'Versement effectués au trésorier par le gérant']].forEach(([k, l]) => { R[k] = line(l, N(f[k])); });
-  R.marge = line('Marge théorique du mois', t.marge, `(Q${tot}-P${tot})-U${tot}`);
-  R.retro = row; line('Rétrocession maximum sur les recettes en liquidité du mois', t.retro, `(C${R.caisse}+C${R.verse})*G${R.retro}/100`); put(6, R.retro, N(f.rate), { s: { numFmt: '0.##' } }); put(7, R.retro, '← taux de rétrocession (%)');
-  R.car = line("Chiffre d'affaire réel (CAR)", t.car, `C${R.grat}+C${R.ramu}+C${R.fonct}+C${R.caisse}+C${R.verse}`);
-  R.cat = line("Chiffre d'affaire théorique (CAT)", t.cat, `Q${tot}`);
-  line('CAR-CAT', t.ecart, `C${R.car}-C${R.cat}`);
-  const rr = line('CAR / CAT', t.ratio == null ? '' : t.ratio, `IFERROR(C${R.car}/C${R.cat},"")`); put(6, rr, '0,98 < N < 1,02');
-  row++;
-  put(1, row, 'Nom et Prénom', { s: bold }); put(3, row, 'Fonction', { s: bold }); put(4, row, 'N° Téléphone', { s: bold }); row++;
-  [['Préparé par', 'prep'], ['Approuvé par', 'appr'], ['Reçu au District par', 'recu']].forEach(([l, k]) => { put(0, row, l, { s: bold }); put(1, row, r.sign[k].nom); put(3, row, r.sign[k].fonc); put(4, row, r.sign[k].tel); row++; });
-  ws['!ref'] = X.utils.encode_range({ s: { c: 0, r: 0 }, e: { c: 21, r: row } });
-  ws['!cols'] = [{ wch: 52 }, { wch: 14 }, ...Array(19).fill({ wch: 14 }), { wch: 9 }];
-  ws['!rows'] = []; ws['!rows'][7] = { hpt: 78 };
-  ws['!merges'] = merges; ws['!freeze'] = { xSplit: 1, ySplit: 9 };
-  ws['!views'] = [{ state: 'frozen', xSplit: 1, ySplit: 9 }];
-  const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, 'SIGL');
+  const line = (label, val, f) => { G.put(0, row, label); if (val !== undefined) G.put(2, row, val, { f, s: { numFmt: '#,##0.###' } }); return row++; };
+  const hasTr = t.nTr > 0, V = `V${first}:V${last}`, K = `K${first}:K${last}`, Rf = {}, fn = r.fin;
+  line('Taux de rupture des médicaments traceurs DMEG (100 x nbre de traceurs en rupture / nbre de traceurs)', hasTr ? t.tauxRup : '', `IF(SUM(${V})=0,"",100*COUNTIFS(${V},1,${K},">0")/SUM(${V}))`);
+  line('Durée moyenne de rupture des médicaments traceurs DMEG (somme des jours de rupture / nbre de traceurs)', hasTr ? t.durRup : '', `IF(SUM(${V})=0,"",SUMIF(${V},1,${K})/SUM(${V}))`);
+  [['grat', 'MEG sorties pour la gratuité des soins et la PF'], ['ramu', 'MEG sorties pour le RAMU'], ['fonct', 'MEG sortie pour le fonctionnement du CSPS'], ['caisse', 'Caisse du gérant non encore versé au trésorier'], ['verse', 'Versement effectués au trésorier par le gérant']].forEach(([k, l]) => { Rf[k] = line(l, N(fn[k])); });
+  Rf.marge = line('Marge théorique du mois', t.marge, `(Q${tot}-P${tot})-U${tot}`);
+  Rf.retro = row; line('Rétrocession maximum sur les recettes en liquidité du mois', t.retro, `(C${Rf.caisse}+C${Rf.verse})*G${Rf.retro}/100`); G.put(6, Rf.retro, N(fn.rate), { s: { numFmt: '0.##' } }); G.put(7, Rf.retro, '← taux de rétrocession (%)');
+  Rf.car = line("Chiffre d'affaire réel (CAR)", t.car, `C${Rf.grat}+C${Rf.ramu}+C${Rf.fonct}+C${Rf.caisse}+C${Rf.verse}`);
+  Rf.cat = line("Chiffre d'affaire théorique (CAT)", t.cat, `Q${tot}`);
+  line('CAR-CAT', t.ecart, `C${Rf.car}-C${Rf.cat}`);
+  const rr = line('CAR / CAT', t.ratio == null ? '' : t.ratio, `IFERROR(C${Rf.car}/C${Rf.cat},"")`); G.put(6, rr, '0,98 < N < 1,02');
+  row++; G.put(1, row, 'Nom et Prénom', { s: bold }); G.put(3, row, 'Fonction', { s: bold }); G.put(4, row, 'N° Téléphone', { s: bold }); row++;
+  [['Préparé par', 'prep'], ['Approuvé par', 'appr'], ['Reçu au District par', 'recu']].forEach(([l, k]) => { G.put(0, row, l, { s: bold }); G.put(1, row, r.sign[k].nom); G.put(3, row, r.sign[k].fonc); G.put(4, row, r.sign[k].tel); row++; });
+  finish(g, 21, row, [{ wch: 52 }, { wch: 14 }, ...Array(19).fill({ wch: 14 }), { wch: 9 }], { '!rows': (() => { const a = []; a[7] = { hpt: 78 }; a[11] = { hpt: 78 }; return a; })(), '!views': [{ state: 'frozen', xSplit: 1, ySplit: 12 }] });
+
+  /* ===== feuille SYNTHESE (regroupement par programme) ===== */
+  const Y = sheet(), y = Y.ws; head(Y, true);
+  H.slice(0, 13).forEach((h, c) => Y.put(c, 8, h, { s: hs })); LET.forEach((l, c) => Y.put(c, 10, l, { s: hs }));
+  const merges = []; let maxY = 11;
+  (window.MAPS ? window.MAPS.syn : []).forEach(e => {
+    maxY = Math.max(maxY, e.r);
+    if (e.label) { for (let c = 0; c < 13; c++) Y.put(c, e.r, c ? '' : e.label, { s: catS }); return; }
+    Y.put(0, e.r, e.a, { s: { border: bd } }); Y.put(1, e.r, e.u || '', { s: { border: bd } });
+    'CDEFGHIJKLM'.split('').forEach((col, i) => Y.put(2 + i, e.r, E.syn(e.r, col), { f: e.t.map((tt, j) => E.refText(tt, e.g[j], col, true)).join('+') || '0', s: NUM }));
+  });
+  finish(y, 12, maxY + 1, [{ wch: 52 }, { wch: 14 }, ...Array(11).fill({ wch: 14 })], { '!rows': (() => { const a = []; a[7] = { hpt: 78 }; return a; })(), '!views': [{ state: 'frozen', xSplit: 1, ySplit: 10 }] });
+
+  /* ===== feuille RMA ===== */
+  const R = sheet(), rs = R.ws, rm = []; let maxR = 6;
+  R.put(0, 1, 'MINISTERE DE LA SANTE', { s: bold }); R.put(6, 1, 'BURKINA FASO', { s: bold });
+  R.put(0, 2, 'REGION DE ' + S0.region); R.put(6, 2, 'La Patrie ou la Mort, Nous Vaincrons!');
+  R.put(0, 3, 'DISTRICT SANITAIRE DE ' + S0.district); R.put(0, 4, 'FORMATION SANITAIRE DE ' + r.csps); R.put(5, 4, `MOIS DE ${MONTHS[r.month - 1]} ${r.year}`, { s: bold });
+  ['Désignation', 'Unité', 'Qtité dispo en début', 'Quantité reçue', 'Quantité consommée', 'Quantité périmée', 'Autres pertes', 'Ajustement (F-)', 'Ajustement (F+)', 'Qtité disponible et utilisable', 'Jours de rupture', 'Quantité à commander'].forEach((h, c) => R.put(c, 5, h, { s: hs }));
+  ['', '', 'A', 'B', 'C', 'D', 'E', 'F-', 'F+', 'G', 'H', 'I'].forEach((l, c) => R.put(c, 6, l, { s: hs }));
+  (window.MAPS ? window.MAPS.rma : []).forEach(e => {
+    maxR = Math.max(maxR, e.r);
+    if (e.label) { for (let c = 0; c < 12; c++) R.put(c, e.r, c ? '' : e.label, { s: catS }); rm.push({ s: { r: e.r - 1, c: 0 }, e: { r: e.r - 1, c: 11 } }); return; }
+    R.put(0, e.r, e.a, { s: { border: bd } }); R.put(1, e.r, e.u || '', { s: { border: bd } });
+    'CDEFGHIJKL'.split('').forEach((col, i) => { const sc = col === 'L' ? 'M' : col; if (e.t.length) R.put(2 + i, e.r, E.rma(e.r, col), { f: e.t.map(tt => E.refText(tt, 'S', sc, false)).join('+'), s: NUM }); else R.put(2 + i, e.r, '', { s: NUM }); });
+  });
+  let rr2 = maxR + 2; R.put(1, rr2, 'Nom et Prénom', { s: bold }); R.put(3, rr2, 'Fonction', { s: bold }); R.put(4, rr2, 'N° Téléphone', { s: bold }); rr2++;
+  [['Préparé par', 'prep'], ['Approuvé par', 'appr'], ['Reçu au District par', 'recu']].forEach(([l, k]) => { R.put(0, rr2, l, { s: bold }); R.put(1, rr2, r.sign[k].nom); R.put(3, rr2, r.sign[k].fonc); R.put(4, rr2, r.sign[k].tel); rr2++; });
+  finish(rs, 11, rr2, [{ wch: 58 }, { wch: 16 }, ...Array(10).fill({ wch: 13 })], { '!merges': rm, '!rows': (() => { const a = []; a[4] = { hpt: 48 }; return a; })(), '!views': [{ state: 'frozen', xSplit: 1, ySplit: 6 }] });
+
+  const wb = X.utils.book_new();
+  X.utils.book_append_sheet(wb, g, 'SIGL'); X.utils.book_append_sheet(wb, y, 'SYNTHESE'); X.utils.book_append_sheet(wb, rs, 'RMA');
   const out = X.write(wb, { bookType: 'xlsx', type: 'array' });
   saveFile(`SIGL_${safe(r.csps)}_${r.year}-${pad2(r.month)}.xlsx`, new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+}
+
+/* ---------- export PDF : SIGL + bilan + RMA ---------- */
+const pt = s => String(s == null ? '' : s).replace(/−/g, '-').replace(/[  ]/g, ' ').replace(/←/g, '<-').replace(/[^\u0000-ÿ‘’“”–—…€Œœ]/g, '');
+const pf = (n, d = 1) => (n == null || !isFinite(n)) ? '' : pt(fmt(n, d));
+function exportPdf(r, onlyFilled) {
+  const { jsPDF } = window.jspdf, doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const E = engine(r), t = totals(r), G = [15, 118, 110], title = `${r.csps} - ${MONTHS[r.month - 1]} ${r.year}`;
+  const sg = S.settings, num = { halign: 'right' };
+  const banner = (label) => {
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.text('MINISTERE DE LA SANTE', 10, 10); doc.text('BURKINA FASO', 287, 10, { align: 'right' });
+    doc.setFont('helvetica', 'normal'); doc.text(pt('REGION DE ' + sg.region), 10, 14.5); doc.text('La Patrie ou la Mort, Nous Vaincrons!', 287, 14.5, { align: 'right' });
+    doc.text('DIRECTION REGIONALE DE LA SANTE', 10, 19);
+    doc.text(pt(`DISTRICT SANITAIRE DE : ${sg.district}      CSPS DE : ${r.csps}`), 10, 24);
+    doc.text(pt(`MOIS DE ${MONTHS[r.month - 1]} ${r.year}      Nombre de jours : ${r.days}      Date : ${r.date ? r.date.split('-').reverse().join('/') : ''}`), 10, 28.5);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(pt(label), 148.5, 34, { align: 'center' });
+  };
+  const common = { theme: 'grid', styles: { font: 'helvetica', fontSize: 6.8, cellPadding: 1, lineColor: [150, 150, 150], lineWidth: 0.1, overflow: 'linebreak' }, headStyles: { fillColor: G, textColor: 255, halign: 'center', valign: 'middle', fontSize: 6.5 }, margin: { left: 10, right: 10, top: 14, bottom: 10 } };
+
+  // 1) SIGL
+  banner('RAPPORT DE GESTION ET DE COMMANDE DES PRODUITS DE SANTE (SIGL)');
+  const items = r.items.filter(it => !onlyFilled || (r.v[it.id] && Object.keys(r.v[it.id]).length));
+  const body = items.map(it => {
+    const v = r.v[it.id], c = calc(it, v, r.days), has = !!v && Object.keys(v).length > 0, g = k => v && v[k] != null ? pf(v[k], 2) : '';
+    return [it.name, it.unit, g('deb'), g('rec'), has ? pf(c.cons, 2) : '', g('per'), g('aut'), g('ajm'), g('ajp'), g('fin'), g('rup'), has ? pf(c.adj, 1) : '', has ? pf(c.cmd, 1) : '', it.pu ? pf(it.pu, 2) : '', has && it.pu ? pf(c.Q, 0) : ''].map(pt).concat([it.free, has && c.cons < 0]);
+  });
+  doc.autoTable({
+    ...common, startY: 37,
+    head: [['Désignation', 'Unité', 'Début (A)', 'Reçu (B)', 'Consommé (C)', 'Périmé (D)', 'Autres pertes (E)', 'Ajust. - (F-)', 'Ajust. + (F+)', 'Stock fin (G)', 'Jours rupture (H)', 'Conso. ajustée (I)', 'À commander (J)', 'Prix unit. CSPS', 'Vente prix public'].map(pt)],
+    body: body.map(b => b.slice(0, 15)),
+    columnStyles: { 0: { cellWidth: 70 }, 1: { cellWidth: 18 }, ...Object.fromEntries(Array.from({ length: 13 }, (_, i) => [i + 2, { ...num, cellWidth: 14.1 }])) },
+    didParseCell: d => { if (d.section === 'body') { const f = body[d.row.index]; if (f[15] && d.column.index === 0) d.cell.styles.fillColor = [255, 236, 214]; if (f[16] && d.column.index === 4) d.cell.styles.textColor = [185, 28, 28]; } },
+    didDrawPage: () => { }
+  });
+  if (!body.length) { doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.text('Aucun produit renseigné.', 10, 48); }
+
+  // 2) Bilan
+  doc.addPage(); banner('BILAN DU MOIS'); const fin = r.fin, ok = t.ratio != null && t.ratio >= 0.98 && t.ratio <= 1.02;
+  const two = (rows, y, x, w) => doc.autoTable({ ...common, startY: y, showHead: false, body: rows.map(a => a.map(pt)), tableWidth: w, margin: { left: x, right: 297 - x - w, top: 14, bottom: 10 }, columnStyles: { 0: { cellWidth: w - 34 }, 1: { halign: 'right', fontStyle: 'bold', cellWidth: 34 } }, styles: { ...common.styles, fontSize: 8.2, cellPadding: 1.5 } });
+  two([['Valeur du stock au début du mois (prix public)', pf(t.R, 0) + ' F'], ['Valeur des MEG reçues (prix public)', pf(t.S, 0) + ' F'], ['Total vente du mois au prix public (DMEG)', pf(t.Q, 0) + ' F'], ['Total vente du mois au prix DRD', pf(t.P, 0) + ' F'], ['Valeur du stock en fin de mois (prix public)', pf(t.T, 0) + ' F'], ['Valeur du stock périmé / cassé (prix public)', pf(t.U, 0) + ' F']], 40, 10, 136);
+  const yL = doc.lastAutoTable.finalY;
+  two([['Taux de rupture des traceurs DMEG', t.tauxRup == null ? '-' : pf(t.tauxRup, 1) + ' %'], ['Durée moyenne de rupture des traceurs (jours)', t.durRup == null ? '-' : pf(t.durRup, 1)], ['Marge théorique du mois', pf(t.marge, 0) + ' F'], [`Rétrocession maximum sur recettes en liquidité (${pf(N(fin.rate), 2)} %)`, pf(t.retro, 0) + ' F']], yL + 5, 10, 136);
+  const yL2 = doc.lastAutoTable.finalY;
+  two([['MEG sorties pour la gratuité des soins et la PF', pf(N(fin.grat), 0) + ' F'], ['MEG sorties pour le RAMU', pf(N(fin.ramu), 0) + ' F'], ['MEG sorties pour le fonctionnement du CSPS', pf(N(fin.fonct), 0) + ' F'], ['Caisse du gérant non encore versé au trésorier', pf(N(fin.caisse), 0) + ' F'], ['Versements effectués au trésorier par le gérant', pf(N(fin.verse), 0) + ' F']], 40, 151, 136);
+  two([["Chiffre d'affaires réel (CAR)", pf(t.car, 0) + ' F'], ["Chiffre d'affaires théorique (CAT)", pf(t.cat, 0) + ' F'], ['CAR - CAT', pf(t.ecart, 0) + ' F'], ['CAR / CAT (norme 0,98 - 1,02)', t.ratio == null ? '-' : pf(t.ratio, 3) + (ok ? '  (conforme)' : '  (hors norme)')]], doc.lastAutoTable.finalY + 5, 151, 136);
+  const yEnd = Math.max(yL2, doc.lastAutoTable.finalY);
+  const sign = (y) => doc.autoTable({ ...common, startY: y, head: [['', 'Nom et prénom', 'Fonction', 'N° de téléphone', 'Date', 'Signature']], body: [['Préparé par', r.sign.prep.nom, r.sign.prep.fonc, r.sign.prep.tel, '', ''], ['Approuvé par', r.sign.appr.nom, r.sign.appr.fonc, r.sign.appr.tel, '', ''], ['Reçu au District par', r.sign.recu.nom, r.sign.recu.fonc, r.sign.recu.tel, '', '']].map(a => a.map(pt)), styles: { ...common.styles, fontSize: 8.5, minCellHeight: 11, valign: 'middle' }, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 38 }, 5: { cellWidth: 50 } } });
+  sign(yEnd + 10);
+
+  // 3) RMA
+  doc.addPage(); banner(`RMA - RAPPORT MENSUEL D'ACTIVITES DES MEG - FORMATION SANITAIRE : ${r.csps}`);
+  const rb = [];
+  (window.MAPS ? window.MAPS.rma : []).forEach(e => {
+    if (e.label) { rb.push([{ content: pt(e.label), colSpan: 12, styles: { fontStyle: 'bold', fillColor: [255, 236, 214], halign: 'left' } }]); return; }
+    const has = e.t && e.t.length, c = col => has ? pf(E.rma(e.r, col), 2) : '';
+    rb.push([pt(e.a), pt(e.u || ''), ...'CDEFGHIJKL'.split('').map(c)]);
+  });
+  doc.autoTable({ ...common, startY: 37, head: [['Désignation', 'Unité', 'Qtité dispo en début (A)', 'Quantité reçue (B)', 'Quantité consommée (C)', 'Quantité périmée (D)', 'Autres pertes (E)', 'Ajust. - (F-)', 'Ajust. + (F+)', 'Qtité disponible (G)', 'Jours de rupture (H)', 'Quantité à commander (I)'].map(pt)], body: rb, columnStyles: { 0: { cellWidth: 82 }, 1: { cellWidth: 24 }, ...Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i + 2, { ...num, cellWidth: 17.1 }])) } });
+  sign(doc.lastAutoTable.finalY + 8);
+
+  // pieds de page
+  const nP = doc.getNumberOfPages();
+  for (let i = 1; i <= nP; i++) { doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(110); doc.text(pt(`SIGL Saisie MEG - ${title}`), 10, 205); doc.text(`Page ${i} / ${nP}`, 287, 205, { align: 'right' }); }
+  saveFile(`SIGL_${safe(r.csps)}_${r.year}-${pad2(r.month)}.pdf`, doc.output('blob'));
+}
+
+function dlgExport() {
+  const d = $('#dlg');
+  d.innerHTML = `<div class="dh">Exporter le rapport</div><div class="db"><div class="fm">
+    <button class="btn" data-ex="xlsx">📗 Excel — 3 feuilles : SIGL, SYNTHESE, RMA</button>
+    <button class="btn" data-ex="pdf">📕 PDF — SIGL + bilan + RMA</button>
+    <label class="chk"><input type="checkbox" id="ex-filled" ${S.pdfFilled === false ? '' : 'checked'}> PDF : seulement les produits renseignés</label>
+    <p class="mut" style="margin:0">Excel : les formules sont conservées, les trois feuilles sont liées comme dans votre classeur.</p></div></div>
+    <div class="df"><button class="btn sec" data-x>Fermer</button></div>`;
+  d.querySelector('[data-x]').onclick = () => d.close();
+  d.querySelectorAll('[data-ex]').forEach(b => b.onclick = async () => {
+    S.pdfFilled = $('#ex-filled').checked; d.close(); await saveNow();
+    try { b.dataset.ex === 'xlsx' ? exportXlsx(S.rep) : exportPdf(S.rep, S.pdfFilled); } catch (e) { console.error(e); alert("Erreur pendant l'export : " + (e && e.message || e)); }
+  });
+  d.showModal();
 }
 
 async function importFile(file) {
@@ -503,7 +649,7 @@ document.addEventListener('click', async e => {
     case 'settings': return go('/reglages');
     case 'addprod': return dlgProduct();
     case 'more': S.shown += PAGE; { const y = scrollY; renderList(false); scrollTo(0, y); } return;
-    case 'xlsx': await saveNow(); return exportXlsx(S.rep);
+    case 'export': await saveNow(); return dlgExport();
     case 'json': await saveNow(); return saveFile(`SAUVEGARDE_${safe(S.rep.csps)}_${S.rep.year}-${pad2(S.rep.month)}.json`, JSON.stringify({ app: 'sigl-meg', version: 1, reports: [S.rep] }), 'application/json');
     case 'backup': { const reports = await DB.reports(); return saveFile(`SAUVEGARDE_SIGL_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({ app: 'sigl-meg', version: 1, full: true, catalog: S.catalog, settings: S.settings, reports }), 'application/json'); }
     case 'carry': {

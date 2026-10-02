@@ -23,5 +23,5 @@ En local (PC avec Node 22 + JDK 21 + Android Studio) : `npm install && npm run a
 - « Nouveau rapport mensuel » : CSPS + mois. Le stock de début de mois est repris du rapport précédent.
 - Produits : 8 champs par produit ; Consommé, Consommé ajusté et À commander se calculent seuls. Entrée = champ suivant.
 - Bilan : caisse, sorties, CAR/CAT (norme 0,98 – 1,02), indicateurs de rupture.
-- Excel : export au format du classeur (formules conservées). Sauvegarde JSON : à envoyer au district, « Importer » pour les regrouper.
+- Exporter : Excel (3 feuilles SIGL, SYNTHESE, RMA, formules conservées) ou PDF (SIGL + bilan + RMA, A4 paysage). Sauvegarde JSON : à envoyer au district, « Importer » pour les regrouper.
 - Catalogue (💊) : modifier prix CSPS / DRD, ajouter un produit, marquer les 25 traceurs.
