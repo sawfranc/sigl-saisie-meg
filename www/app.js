@@ -538,7 +538,7 @@ function exportXlsx(r) {
 }
 
 /* ---------- export PDF : SIGL + bilan + RMA ---------- */
-const pt = s => String(s == null ? '' : s).replace(/−/g, '-').replace(/[  ]/g, ' ').replace(/←/g, '<-').replace(/[^\u0000-ÿ‘’“”–—…€Œœ]/g, '');
+const pt = s => String(s == null ? '' : s).replace(/μ/g, 'µ').replace(/−/g, '-').replace(/[  ]/g, ' ').replace(/←/g, '<-').replace(/[^\u0000-ÿ‘’“”–—…€Œœ]/g, '');
 const pf = (n, d = 1) => (n == null || !isFinite(n)) ? '' : pt(fmt(n, d));
 function exportPdf(r, onlyFilled) {
   const { jsPDF } = window.jspdf, doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
