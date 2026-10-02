@@ -1,0 +1,53 @@
+{
+  "name": "sigl-saisie-meg",
+  "productName": "SIGL Saisie MEG",
+  "version": "1.0.0",
+  "description": "Saisie du rapport de gestion et de commande des produits de santé (SIGL) – CSPS",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "web": "npx --yes http-server www -p 8080 -c-1",
+    "win:installer": "electron-builder --win nsis portable --x64",
+    "win:zip": "electron-packager . \"SIGL Saisie MEG\" --platform=win32 --arch=x64 --out=dist --overwrite --icon=build/icon.ico --ignore=\"^/(android|dist|\\.github|node_modules/(?!none))\"",
+    "android:sync": "cap sync android",
+    "android:apk": "cap sync android && cd android && ./gradlew assembleDebug"
+  },
+  "build": {
+    "appId": "bf.gourcy.siglmeg",
+    "productName": "SIGL Saisie MEG",
+    "files": [
+      "electron/**",
+      "www/**",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    },
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    }
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.2",
+    "@electron/packager": "^20.3.0",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/filesystem": "^8.1.3",
+    "@capacitor/share": "^8.0.2",
+    "xlsx-js-style": "^1.2.0"
+  }
+}

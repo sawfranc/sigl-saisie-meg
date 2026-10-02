@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SIGL Saisie MEG</string>
+    <string name="title_activity_main">SIGL Saisie MEG</string>
+    <string name="package_name">bf.gourcy.siglmeg</string>
+    <string name="custom_url_scheme">bf.gourcy.siglmeg</string>
+</resources>

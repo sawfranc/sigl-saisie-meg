@@ -1,0 +1,7 @@
+{
+  "appId": "bf.gourcy.siglmeg",
+  "appName": "SIGL Saisie MEG",
+  "webDir": "www",
+  "android": { "allowMixedContent": false },
+  "server": { "androidScheme": "https" }
+}
