@@ -264,18 +264,19 @@ function visibleItems() {
 const FILTERS = [['all', 'Tous'], ['todo', 'À saisir'], ['done', 'Saisis'], ['alert', '⚠ Alertes'], ['free', 'Gratuits'], ['paid', 'Payants'], ['tr', 'Traceurs']];
 
 function paneProducts() {
-  const r = S.rep;
-  $('#pane').innerHTML = `<div class="tools"><input type="search" id="q" placeholder="Rechercher un produit…" value="${esc(S.q)}" autocomplete="off">
+  $('#pane').innerHTML = `<div class="stick"><div class="tools"><input type="search" id="q" placeholder="Rechercher un produit…" value="${esc(S.q)}" autocomplete="off">
     <div class="chips">${FILTERS.map(([k, l]) => `<button class="chip ${S.filter === k ? 'on' : ''}" data-filter="${k}">${l}</button>`).join('')}</div></div>
-    <div class="body"><div class="hdr"><div>Désignation</div>${FIELDS.map(f => `<div>${f[1]}<br>(${f[2]})</div>`).join('')}<div>Consommé<br>(C)</div><div>Conso. ajustée<br>(I)</div><div>À commander<br>(J)</div></div>
-    <div id="list"></div><div id="foot"></div></div>`;
-  renderList(true);
+    <div class="hdr"><div>Désignation</div>${FIELDS.map(f => `<div class="${f[0] === 'fin' ? 'hfin' : ''}">${f[1]}<br>(${f[2]})</div>`).join('')}<div>Consommé<br>(C)</div><div>Conso. ajustée<br>(I)</div><div>À commander<br>(J)</div></div></div>
+    <div class="body"><div id="list"></div><div id="foot"></div></div>`;
+  setTopH(); renderList(true);
 }
+function setTopH() { const t = $('.top'); if (t) document.documentElement.style.setProperty('--topH', t.offsetHeight + 'px'); }
+window.addEventListener('resize', setTopH);
 function rowHTML(it) {
   const r = S.rep, v = r.v[it.id] || {};
   return `<div class="row ${it.free ? 'free' : ''}" data-id="${it.id}">
     <div class="nm"><div class="n"><b>${esc(it.name)}</b><small>${esc(it.unit)}${it.pu ? ' · ' + fmt(it.pu, 2) + ' F' : ''}${it.tr ? ' · traceur' : ''}</small></div><button class="ed" data-edit="${it.id}" aria-label="Modifier le produit">✎</button></div>
-    <div class="fields">${FIELDS.map(([k, l]) => `<label><span>${l}</span><input data-k="${k}" inputmode="decimal" autocomplete="off" value="${v[k] == null ? '' : String(v[k]).replace('.', ',')}"></label>`).join('')}</div>
+    <div class="fields">${FIELDS.map(([k, l]) => `<label class="${k === 'fin' ? 'fin' : ''}"><span>${l}</span><input data-k="${k}" inputmode="decimal" autocomplete="off" value="${v[k] == null ? '' : String(v[k]).replace('.', ',')}"></label>`).join('')}</div>
     <div class="calc"><div><small>Consommé</small><b data-o="cons"></b></div><div><small>Conso. ajustée</small><b data-o="adj"></b></div><div><small>À commander</small><b data-o="cmd"></b></div></div>
     <div class="flag" hidden></div></div>`;
 }
@@ -450,7 +451,7 @@ function viewSettings() {
       <div class="row-btns" style="margin:0">${hasPw() ? `<button class="btn sec" data-act="pwchange">Changer le mot de passe</button>${s.pw ? '<button class="btn sec" data-act="pwremove">Retirer le mot de passe</button>' : ''}${!isLocked() ? '<button class="btn sec" data-act="pwlock">Verrouiller maintenant</button>' : ''}` : '<button class="btn" data-act="pwset">Définir un mot de passe</button>'}</div></div>
     <div class="card"><h2>Données</h2><p class="mut" style="margin-top:0">Les données restent sur cet appareil. Faites régulièrement une sauvegarde et transmettez-la au district (WhatsApp, e-mail, clé USB).</p>
       <div class="row-btns" style="margin:0"><button class="btn" data-act="backup">Sauvegarder tout (JSON)</button><button class="btn sec" data-act="import">Restaurer / importer</button><button class="btn sec" data-act="catalog">Catalogue des produits</button></div></div>
-    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.2.1 · fonctionne sans connexion</p></div>`;
+    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.3 · fonctionne sans connexion</p></div>`;
   ['s-d', 's-r', 's-rate'].forEach(i => $('#' + i).addEventListener('change', () => { s.district = $('#s-d').value.trim(); s.region = $('#s-r').value.trim(); s.rate = N(num($('#s-rate').value)); saveSettings(); toast('Enregistré'); }));
 }
 
@@ -560,7 +561,7 @@ function exportXlsx(r) {
   const rr = line('CAR / CAT', t.ratio == null ? '' : t.ratio, `IFERROR(C${Rf.car}/C${Rf.cat},"")`); G.put(6, rr, '0,98 < N < 1,02');
   row++; G.put(1, row, 'Nom et Prénom', { s: bold }); G.put(3, row, 'Fonction', { s: bold }); G.put(4, row, 'N° Téléphone', { s: bold }); row++;
   [['Préparé par', 'prep'], ['Approuvé par', 'appr'], ['Reçu au District par', 'recu']].forEach(([l, k]) => { G.put(0, row, l, { s: bold }); G.put(1, row, r.sign[k].nom); G.put(3, row, r.sign[k].fonc); G.put(4, row, r.sign[k].tel); row++; });
-  finish(g, 21, row, [{ wch: 52 }, { wch: 14 }, ...Array(19).fill({ wch: 14 }), { wch: 9 }], { '!rows': (() => { const a = []; a[7] = { hpt: 78 }; a[11] = { hpt: 78 }; return a; })(), '!views': [{ state: 'frozen', xSplit: 1, ySplit: 12 }] });
+  finish(g, 21, row, [{ wch: 52 }, { wch: 14 }, ...Array(19).fill({ wch: 14 }), { wch: 9 }], { '!rows': (() => { const a = []; a[7] = { hpt: 78 }; a[11] = { hpt: 78 }; return a; })() });
 
   /* ===== feuille SYNTHESE (regroupement par programme) ===== */
   const Y = sheet(), y = Y.ws; head(Y, true);
@@ -572,7 +573,7 @@ function exportXlsx(r) {
     Y.put(0, e.r, e.a, { s: { border: bd } }); Y.put(1, e.r, e.u || '', { s: { border: bd } });
     'CDEFGHIJKLM'.split('').forEach((col, i) => Y.put(2 + i, e.r, E.syn(e.r, col), { f: e.t.map((tt, j) => E.refText(tt, e.g[j], col, true)).join('+') || '0', s: NUM }));
   });
-  finish(y, 12, maxY + 1, [{ wch: 52 }, { wch: 14 }, ...Array(11).fill({ wch: 14 })], { '!rows': (() => { const a = []; a[7] = { hpt: 78 }; return a; })(), '!views': [{ state: 'frozen', xSplit: 1, ySplit: 10 }] });
+  finish(y, 12, maxY + 1, [{ wch: 52 }, { wch: 14 }, ...Array(11).fill({ wch: 14 })], { '!rows': (() => { const a = []; a[7] = { hpt: 78 }; return a; })() });
 
   /* ===== feuille RMA ===== */
   const R = sheet(), rs = R.ws, rm = []; let maxR = 6;
@@ -589,7 +590,7 @@ function exportXlsx(r) {
   });
   let rr2 = maxR + 2; R.put(1, rr2, 'Nom et Prénom', { s: bold }); R.put(3, rr2, 'Fonction', { s: bold }); R.put(4, rr2, 'N° Téléphone', { s: bold }); rr2++;
   [['Préparé par', 'prep'], ['Approuvé par', 'appr'], ['Reçu au District par', 'recu']].forEach(([l, k]) => { R.put(0, rr2, l, { s: bold }); R.put(1, rr2, r.sign[k].nom); R.put(3, rr2, r.sign[k].fonc); R.put(4, rr2, r.sign[k].tel); rr2++; });
-  finish(rs, 11, rr2, [{ wch: 58 }, { wch: 16 }, ...Array(10).fill({ wch: 13 })], { '!merges': rm, '!rows': (() => { const a = []; a[4] = { hpt: 48 }; return a; })(), '!views': [{ state: 'frozen', xSplit: 1, ySplit: 6 }] });
+  finish(rs, 11, rr2, [{ wch: 58 }, { wch: 16 }, ...Array(10).fill({ wch: 13 })], { '!merges': rm, '!rows': (() => { const a = []; a[4] = { hpt: 48 }; return a; })() });
 
   const wb = X.utils.book_new();
   X.utils.book_append_sheet(wb, g, 'SIGL'); X.utils.book_append_sheet(wb, y, 'SYNTHESE'); X.utils.book_append_sheet(wb, rs, 'RMA');
