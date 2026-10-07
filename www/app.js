@@ -346,6 +346,8 @@ function applyRecs(r, mutate) {
     if (!Object.keys(v).length) delete r.v[pid];
   }
 }
+const money = n => fmt(Math.round(n), 0) + ' F';
+function recVal(r, lines) { const m = new Map(r.items.map(i => [i.id, i])); let a = 0, v = 0; for (const l of lines) { const it = m.get(l.pid); if (!it) continue; a += N(l.qty) * N(it.drd); v += N(l.qty) * N(it.pu); } return { a, v }; }
 function rcBadge() { const e = $('#rcn'); if (e && S.rep) { const n = (S.rep.recs || []).length; e.textContent = n ? ' ' + n : ''; } }
 function rcRefresh() { rcBadge(); if (S.tab === 'prod' && $('#list')) renderList(false); }
 
@@ -355,7 +357,7 @@ function dlgRecs() {
   d.className = 'big';
   d.innerHTML = `<div class="dh">📦 Réceptions · ${MONTHS[r.month - 1]} ${r.year}</div><div class="db">
     <p class="mut" style="margin:0 0 10px">Enregistrez chaque commande reçue (bon de livraison). La colonne <b>Reçu (B)</b> de chaque produit est mise à jour automatiquement : plusieurs réceptions s'additionnent.</p>
-    ${recs.length ? recs.map(x => `<div class="cat-item" data-rc="${x.id}"><div class="n"><b>${fd(x.date)} · ${esc(x.ref || 'sans n° de bon')}</b><small>${x.lines.length} produit(s)${x.note ? ' · ' + esc(x.note) : ''}</small></div><span class="mut">✎</span></div>`).join('') + `<p class="mut" style="text-align:center;margin:12px 0 0">${recs.length} réception(s) · ${grand} ligne(s)</p>` : `<div class="empty">Aucune réception enregistrée ce mois-ci.</div>`}
+    ${recs.length ? recs.map(x => `<div class="cat-item" data-rc="${x.id}"><div class="n"><b>${fd(x.date)} · ${esc(x.ref || 'sans n° de bon')}</b><small>${x.lines.length} produit(s) · achat ${money(recVal(r, x.lines).a)} · vente publique ${money(recVal(r, x.lines).v)}</small></div><span class="mut">✎</span></div>`).join('') + (() => { const all = recVal(r, recs.flatMap(x => x.lines)); return `<div class="rc-tot"><div><small>${recs.length} réception(s) · ${grand} ligne(s)</small></div><div><small>Total achat</small><b>${money(all.a)}</b></div><div><small>Total vente au public</small><b>${money(all.v)}</b></div></div>`; })() : `<div class="empty">Aucune réception enregistrée ce mois-ci.</div>`}
   </div><div class="df"><button class="btn sec" data-x>Fermer</button><button class="btn" data-new>＋ Nouvelle réception</button></div>`;
   d.querySelector('[data-x]').onclick = () => d.close();
   d.querySelector('[data-new]').onclick = () => dlgRecEdit();
@@ -375,19 +377,24 @@ function dlgRecEdit(id) {
     <label class="srch">Ajouter un produit reçu<input id="rc-q" type="search" placeholder="Tapez le nom du produit…" autocomplete="off" enterkeyhint="done"></label>
     <div id="rc-s" class="sug"></div>
     <div id="rc-l"></div>
-  </div><div class="df">${old ? '<button class="btn bad" data-del style="margin-right:auto">Supprimer</button>' : ''}<button class="btn sec" data-x>Retour</button><button class="btn" data-ok>Enregistrer</button></div>`;
+  </div><div id="rc-sum" class="rc-sum" hidden></div><div class="df">${old ? '<button class="btn bad" data-del style="margin-right:auto">Supprimer</button>' : ''}<button class="btn sec" data-x>Retour</button><button class="btn" data-ok>Enregistrer</button></div>`;
   const q = d.querySelector('#rc-q'), L = d.querySelector('#rc-l'), SG = d.querySelector('#rc-s');
   const total = () => ed.lines.reduce((n, l) => n + N(l.qty), 0);
   function drawLines() {
-    L.innerHTML = ed.lines.length ? `<div class="rc-h"><b>${ed.lines.length} produit(s) dans cette réception</b><span id="rc-t" class="mut"></span></div>` + ed.lines.map(l => { const it = byId.get(l.pid); return `<div class="rc-line" data-p="${l.pid}"><div class="n"><b>${esc(it ? it.name : l.pid)}</b><small>${esc(it ? it.unit : '')}</small></div><input data-q="${l.pid}" inputmode="decimal" autocomplete="off" enterkeyhint="next" placeholder="Qté" value="${l.qty == null ? '' : String(l.qty).replace('.', ',')}"><button type="button" class="ed" data-rm="${l.pid}" aria-label="Retirer">✕</button></div>`; }).join('') : `<div class="empty" style="padding:18px">Aucun produit pour l'instant.<br>Recherchez-en un ci-dessus.</div>`;
+    L.innerHTML = ed.lines.length ? `<div class="rc-h"><b>${ed.lines.length} produit(s) dans cette réception</b><span id="rc-t" class="mut"></span></div>` + ed.lines.map(l => { const it = byId.get(l.pid); return `<div class="rc-line" data-p="${l.pid}"><div class="n"><b>${esc(it ? it.name : l.pid)}</b><small>${esc(it ? it.unit : '')}</small><small class="pr">Achat : <span>${it ? fmt(N(it.drd), 2) : 0} F</span> × qté = <b data-la="${l.pid}"></b></small><small class="pr">Public : <span>${it ? fmt(N(it.pu), 2) : 0} F</span> × qté = <b data-lv="${l.pid}"></b></small></div><input data-q="${l.pid}" inputmode="decimal" autocomplete="off" enterkeyhint="next" placeholder="Qté" value="${l.qty == null ? '' : String(l.qty).replace('.', ',')}"><button type="button" class="ed" data-rm="${l.pid}" aria-label="Retirer">✕</button></div>`; }).join('') : `<div class="empty" style="padding:18px">Aucun produit pour l'instant.<br>Recherchez-en un ci-dessus.</div>`;
     sum();
   }
-  function sum() { const t = d.querySelector('#rc-t'); if (t) t.textContent = 'Total : ' + fmt(total(), 2) + ' unités'; }
+  function sum() {
+    const t = d.querySelector('#rc-t'); if (t) t.textContent = 'Total : ' + fmt(total(), 2) + ' unités';
+    for (const l of ed.lines) { const it = byId.get(l.pid); if (!it) continue; const a = d.querySelector(`[data-la="${l.pid}"]`), v = d.querySelector(`[data-lv="${l.pid}"]`); if (a) a.textContent = money(N(l.qty) * N(it.drd)); if (v) v.textContent = money(N(l.qty) * N(it.pu)); }
+    const T = recVal(r, ed.lines), box = d.querySelector('#rc-sum');
+    box.hidden = !ed.lines.length; box.innerHTML = `<div><small>Total achat de la liste</small><b>${money(T.a)}</b></div><div><small>Total vente au public</small><b>${money(T.v)}</b></div><div><small>Marge théorique</small><b>${money(T.v - T.a)}</b></div>`;
+  }
   function sug() {
     const toks = norm(q.value).split(/\s+/).filter(Boolean);
     if (!toks.length) { SG.innerHTML = ''; return []; }
     const m = r.items.filter(i => { const n = norm(i.name); return toks.every(t => n.includes(t)); }).slice(0, 8);
-    SG.innerHTML = m.length ? m.map(i => `<button type="button" data-add="${i.id}"><b>${esc(i.name)}</b><small>${esc(i.unit)}${ed.lines.some(l => l.pid === i.id) ? ' · déjà ajouté' : ''}</small></button>`).join('') : `<div class="mut" style="padding:8px">Aucun produit trouvé.</div>`;
+    SG.innerHTML = m.length ? m.map(i => `<button type="button" data-add="${i.id}"><b>${esc(i.name)}</b><small>${esc(i.unit)} · achat ${fmt(N(i.drd), 2)} F · public ${fmt(N(i.pu), 2)} F${ed.lines.some(l => l.pid === i.id) ? ' · déjà ajouté' : ''}</small></button>`).join('') : `<div class="mut" style="padding:8px">Aucun produit trouvé.</div>`;
     return m;
   }
   function add(pid) {
@@ -549,7 +556,7 @@ function viewSettings() {
       <div class="row-btns" style="margin:0">${hasPw() ? `<button class="btn sec" data-act="pwchange">Changer le mot de passe</button>${s.pw ? '<button class="btn sec" data-act="pwremove">Retirer le mot de passe</button>' : ''}${!isLocked() ? '<button class="btn sec" data-act="pwlock">Verrouiller maintenant</button>' : ''}` : '<button class="btn" data-act="pwset">Définir un mot de passe</button>'}</div></div>
     <div class="card"><h2>Données</h2><p class="mut" style="margin-top:0">Les données restent sur cet appareil. Faites régulièrement une sauvegarde et transmettez-la au district (WhatsApp, e-mail, clé USB).</p>
       <div class="row-btns" style="margin:0"><button class="btn" data-act="backup">Sauvegarder tout (JSON)</button><button class="btn sec" data-act="import">Restaurer / importer</button><button class="btn sec" data-act="catalog">Catalogue des produits</button></div></div>
-    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.4 · fonctionne sans connexion</p></div>`;
+    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.5 · fonctionne sans connexion</p></div>`;
   ['s-d', 's-r', 's-rate'].forEach(i => $('#' + i).addEventListener('change', () => { s.district = $('#s-d').value.trim(); s.region = $('#s-r').value.trim(); s.rate = N(num($('#s-rate').value)); saveSettings(); toast('Enregistré'); }));
 }
 
@@ -781,9 +788,57 @@ function exportPdf(r, onlyFilled, parts, tag) {
   saveFile(`${tag}_${safe(r.csps)}_${r.year}-${pad2(r.month)}.pdf`, doc.output('blob'));
 }
 
+/* ---------- aperçu avant export ---------- */
+function previewHTML(r, onlyFilled) {
+  const E = engine(r), t = totals(r), fin = r.fin, ok = t.ratio != null && t.ratio >= 0.98 && t.ratio <= 1.02;
+  const f = (n, d = 1) => (n == null || !isFinite(n)) ? '' : fmt(n, d), th = a => '<tr>' + a.map(x => `<th>${esc(x)}</th>`).join('') + '</tr>';
+  const sign = `<table class="pv sg"><tr><th></th><th>Nom et prénom</th><th>Fonction</th><th>Téléphone</th></tr>${[['Préparé par', r.sign.prep], ['Approuvé par', r.sign.appr], ['Reçu au District par', r.sign.recu]].map(([l, o]) => `<tr><td><b>${l}</b></td><td>${esc(o.nom)}</td><td>${esc(o.fonc)}</td><td>${esc(o.tel)}</td></tr>`).join('')}</table>`;
+  const none = '<p class="mut">Aucun produit renseigné.</p>';
+  // SIGL
+  const items = r.items.filter(it => !onlyFilled || (r.v[it.id] && Object.keys(r.v[it.id]).length));
+  const sigl = items.length ? `<table class="pv"><thead>${th(['Désignation', 'Unité', 'Début (A)', 'Reçu (B)', 'Consommé (C)', 'Périmé (D)', 'Autres pertes (E)', 'Ajust. − (F-)', 'Ajust. + (F+)', 'Stock fin (G)', 'Jours rupture (H)', 'Conso. ajustée (I)', 'À commander (J)', 'Prix unit. CSPS', 'Vente prix public'])}</thead><tbody>${items.map(it => {
+    const v = r.v[it.id], c = calc(it, v, r.days), hv = !!v && Object.keys(v).length > 0, g = k => v && v[k] != null ? f(v[k], 2) : '';
+    return `<tr class="${it.free ? 'fr' : ''}"><td>${esc(it.name)}</td><td>${esc(it.unit)}</td><td>${g('deb')}</td><td>${g('rec')}</td><td class="${hv && c.cons < 0 ? 'neg' : ''}">${hv ? f(c.cons, 2) : ''}</td><td>${g('per')}</td><td>${g('aut')}</td><td>${g('ajm')}</td><td>${g('ajp')}</td><td class="fi">${g('fin')}</td><td>${g('rup')}</td><td>${hv ? f(c.adj, 1) : ''}</td><td>${hv ? f(c.cmd, 1) : ''}</td><td>${it.pu ? f(it.pu, 2) : ''}</td><td>${hv && it.pu ? f(c.Q, 0) : ''}</td></tr>`;
+  }).join('')}</tbody></table>` : none;
+  // Bilan
+  const two = rows => `<table class="pv bil">${rows.map(([a, b]) => `<tr><td>${esc(a)}</td><td><b>${esc(b)}</b></td></tr>`).join('')}</table>`;
+  const bilan = `<div class="pv2">${two([['Valeur du stock au début du mois (prix public)', money(t.R)], ['Valeur des MEG reçues (prix public)', money(t.S)], ['Total vente du mois au prix public (DMEG)', money(t.Q)], ['Total vente du mois au prix DRD', money(t.P)], ['Valeur du stock en fin de mois (prix public)', money(t.T)], ['Valeur du stock périmé / cassé (prix public)', money(t.U)]])}${two([['Taux de rupture des traceurs DMEG', t.tauxRup == null ? '-' : f(t.tauxRup, 1) + ' %'], ['Durée moyenne de rupture des traceurs (jours)', t.durRup == null ? '-' : f(t.durRup, 1)], ['Marge théorique du mois', money(t.marge)], [`Rétrocession maximum (${f(N(fin.rate), 2)} %)`, money(t.retro)]])}${two([['MEG sorties pour la gratuité et la PF', money(N(fin.grat))], ['MEG sorties pour le RAMU', money(N(fin.ramu))], ['MEG sorties pour le fonctionnement', money(N(fin.fonct))], ['Caisse du gérant non versée', money(N(fin.caisse))], ['Versements au trésorier', money(N(fin.verse))]])}${two([["Chiffre d'affaires réel (CAR)", money(t.car)], ["Chiffre d'affaires théorique (CAT)", money(t.cat)], ['CAR − CAT', money(t.ecart)], ['CAR / CAT (norme 0,98 – 1,02)', t.ratio == null ? '-' : f(t.ratio, 3) + (ok ? ' (conforme)' : ' (hors norme)')]])}</div>`;
+  // SYNTHESE / RMA
+  const group = (entries, fn, cols, head) => {
+    const cl = 'CDEFGHIJKLM'.slice(0, cols), rows = []; let pend = null;
+    entries.forEach(e => {
+      if (e.label) { pend = `<tr class="cat"><td colspan="${cols + 2}">${esc(e.label)}</td></tr>`; if (!onlyFilled) { rows.push(pend); pend = null; } return; }
+      const hasT = e.t && e.t.length, vals = cl.split('').map(c => hasT ? fn(e.r, c) : null);
+      if (onlyFilled && !vals.some(v => v)) return;
+      if (pend) { rows.push(pend); pend = null; }
+      rows.push(`<tr><td>${esc(e.a)}</td><td>${esc(e.u || '')}</td>${vals.map(v => `<td>${v == null ? '' : f(v, 2)}</td>`).join('')}</tr>`);
+    });
+    return rows.length ? `<table class="pv"><thead>${th(head)}</thead><tbody>${rows.join('')}</tbody></table>` : none;
+  };
+  const syn = group(window.MAPS ? window.MAPS.syn : [], (n, c) => E.syn(n, c), 11, ['Désignation', 'Unité', 'Début (A)', 'Reçu (B)', 'Consommé (C)', 'Périmé (D)', 'Autres pertes (E)', 'Ajust. − (F-)', 'Ajust. + (F+)', 'Stock fin (G)', 'Jours rupture (H)', 'Conso. ajustée (I)', 'À commander (J)']);
+  const rma = group(window.MAPS ? window.MAPS.rma : [], (n, c) => E.rma(n, c), 10, ['Désignation', 'Unité', 'Dispo début (A)', 'Reçue (B)', 'Consommée (C)', 'Périmée (D)', 'Autres pertes (E)', 'Ajust. − (F-)', 'Ajust. + (F+)', 'Disponible (G)', 'Jours rupture (H)', 'À commander (I)']);
+  return { sigl: sigl + sign, bilan: bilan + sign, syn: syn + sign, rma: rma + sign };
+}
+function dlgPreview(part) {
+  const d = $('#dlg3'), r = S.rep, only = S.pdfFilled !== false, H = previewHTML(r, only);
+  const TABS = [['sigl', 'SIGL'], ['bilan', 'Bilan'], ['syn', 'SYNTHESE'], ['rma', 'RMA']]; part = part || 'sigl';
+  d.className = 'huge';
+  d.innerHTML = `<div class="dh">Aperçu avant export · ${esc(r.csps)} · ${MONTHS[r.month - 1]} ${r.year}</div>
+    <div class="pvtabs">${TABS.map(([k, l]) => `<button class="chip ${k === part ? 'on' : ''}" data-pv="${k}">${l}</button>`).join('')}<label class="chk pvchk"><input type="checkbox" id="pv-f" ${only ? 'checked' : ''}> seulement les lignes renseignées</label></div>
+    <div class="db pvbody">${H[part]}</div>
+    <div class="df"><button class="btn sec" data-x>Retour</button><button class="btn sec" data-pdf>📕 PDF de cet onglet</button><button class="btn" data-xl>📗 Excel</button></div>`;
+  d.querySelectorAll('[data-pv]').forEach(b => b.onclick = () => dlgPreview(b.dataset.pv));
+  d.querySelector('#pv-f').onchange = e => { S.pdfFilled = e.target.checked; dlgPreview(part); };
+  d.querySelector('[data-x]').onclick = () => { d.close(); dlgExport(); };
+  d.querySelector('[data-xl]').onclick = () => { d.close(); try { exportXlsx(r); } catch (e) { alert("Erreur pendant l'export : " + (e && e.message || e)); } };
+  d.querySelector('[data-pdf]').onclick = () => { const tag = { sigl: 'SIGL', bilan: 'BILAN', syn: 'SYNTHESE', rma: 'RMA' }[part]; d.close(); try { exportPdf(r, S.pdfFilled !== false, [part], tag); } catch (e) { alert("Erreur pendant l'export : " + (e && e.message || e)); } };
+  d.onclose = null; if (!d.open) d.showModal();
+}
+
 function dlgExport() {
   const d = $('#dlg');
   d.innerHTML = `<div class="dh">Exporter le rapport</div><div class="db"><div class="fm">
+    <button class="btn sec" data-pre style="border-width:2px">👁 Aperçu avant export</button>
     <button class="btn" data-ex="xlsx">📗 Excel — 3 feuilles : SIGL, SYNTHESE, RMA</button>
     <div class="mut" style="font-weight:700;margin-top:4px">PDF (A4 paysage)</div>
     <button class="btn sec" data-ex="pdf:sigl,bilan:SIGL">📕 SIGL + bilan</button>
@@ -794,6 +849,7 @@ function dlgExport() {
     <p class="mut" style="margin:0">Excel : les formules sont conservées, les trois feuilles sont liées comme dans votre classeur.</p></div></div>
     <div class="df"><button class="btn sec" data-x>Fermer</button></div>`;
   d.querySelector('[data-x]').onclick = () => d.close();
+  d.querySelector('[data-pre]').onclick = () => { S.pdfFilled = $('#ex-filled').checked; d.close(); dlgPreview(); };
   d.querySelectorAll('[data-ex]').forEach(b => b.onclick = async () => {
     S.pdfFilled = $('#ex-filled').checked; const [k, parts, tag] = b.dataset.ex.split(':'); d.close(); await saveNow();
     try { k === 'xlsx' ? exportXlsx(S.rep) : exportPdf(S.rep, S.pdfFilled, parts.split(','), tag); } catch (e) { console.error(e); alert("Erreur pendant l'export : " + (e && e.message || e)); }

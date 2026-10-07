@@ -35,3 +35,5 @@ En local (PC avec Node 22 + JDK 21 + Android Studio) : `npm install && npm run a
 
 ## Réceptions (commandes reçues)
 Bouton **📦 Réceptions** en haut du rapport : une réception = une date, un n° de bon et une liste de produits avec quantités. Plusieurs réceptions dans le mois s'additionnent automatiquement dans la colonne « Reçu (B) ». Voir le guide d'utilisation.
+
+Le formulaire de réception affiche prix d'achat (DRD) et prix public unitaires et totaux par produit et pour la liste. **Exporter → Aperçu avant export** montre SIGL, Bilan, SYNTHESE et RMA à l'écran avant de générer le fichier.
