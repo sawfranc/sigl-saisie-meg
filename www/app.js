@@ -157,7 +157,7 @@ function newReport(csps, y, m) {
     date: new Date().toISOString().slice(0, 10),
     items: S.catalog.map(c => ({ ...c })), v: {},
     fin: { grat: null, ramu: null, fonct: null, caisse: null, verse: null, rate: S.settings.rate },
-    sign: last ? JSON.parse(JSON.stringify(last.sign)) : { prep: { nom: '', fonc: 'GERANT', tel: '' }, appr: { nom: '', fonc: 'ICP', tel: '' }, recu: { nom: '', fonc: 'Pharmacien/PEP', tel: '' } },
+    sign: last ? Object.fromEntries(Object.entries(last.sign).map(([k, o]) => [k, { nom: '', fonc: o.fonc || '', tel: '' }])) : { prep: { nom: '', fonc: 'GERANT', tel: '' }, appr: { nom: '', fonc: 'ICP', tel: '' }, recu: { nom: '', fonc: 'Pharmacien/PEP', tel: '' } },
     updated: Date.now()
   };
   if (before) carryOver(rep, before);
@@ -443,7 +443,8 @@ function paneBilan() {
       ${fi('grat', 'MEG sorties pour la gratuité des soins et la PF')}${fi('ramu', 'MEG sorties pour le RAMU')}${fi('fonct', 'MEG sorties pour le fonctionnement du CSPS')}
       ${fi('caisse', 'Caisse du gérant non encore versé au trésorier')}${fi('verse', 'Versements effectués au trésorier par le gérant')}
       <label>Taux de rétrocession (%)<input data-f="rate" inputmode="decimal" value="${String(N(f.rate)).replace('.', ',')}"></label></div></div>
-    <div id="bres2"></div></div>`;
+    <div id="bres2"></div>
+    <div class="row-btns"><button class="btn sec bad-o" data-act="bilanreset">↺ Remettre le bilan à vide</button></div></div>`;
   bilanResults();
 }
 function bilanResults() {
@@ -556,7 +557,7 @@ function viewSettings() {
       <div class="row-btns" style="margin:0">${hasPw() ? `<button class="btn sec" data-act="pwchange">Changer le mot de passe</button>${s.pw ? '<button class="btn sec" data-act="pwremove">Retirer le mot de passe</button>' : ''}${!isLocked() ? '<button class="btn sec" data-act="pwlock">Verrouiller maintenant</button>' : ''}` : '<button class="btn" data-act="pwset">Définir un mot de passe</button>'}</div></div>
     <div class="card"><h2>Données</h2><p class="mut" style="margin-top:0">Les données restent sur cet appareil. Faites régulièrement une sauvegarde et transmettez-la au district (WhatsApp, e-mail, clé USB).</p>
       <div class="row-btns" style="margin:0"><button class="btn" data-act="backup">Sauvegarder tout (JSON)</button><button class="btn sec" data-act="import">Restaurer / importer</button><button class="btn sec" data-act="catalog">Catalogue des produits</button></div></div>
-    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.5 · fonctionne sans connexion</p></div>`;
+    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.5.1 · fonctionne sans connexion</p></div>`;
   ['s-d', 's-r', 's-rate'].forEach(i => $('#' + i).addEventListener('change', () => { s.district = $('#s-d').value.trim(); s.region = $('#s-r').value.trim(); s.rate = N(num($('#s-rate').value)); saveSettings(); toast('Enregistré'); }));
 }
 
@@ -898,6 +899,7 @@ document.addEventListener('click', async e => {
     case 'addprod': return dlgProduct();
     case 'more': S.shown += PAGE; { const y = scrollY; renderList(false); scrollTo(0, y); } return;
     case 'recs': return dlgRecs();
+    case 'bilanreset': if (confirm('Vider tous les champs du bilan (caisse, sorties, versements) de ce rapport ?')) { Object.assign(S.rep.fin, { grat: null, ramu: null, fonct: null, caisse: null, verse: null, rate: S.settings.rate }); await saveNow(); paneBilan(); toast('Bilan remis à vide'); } return;
     case 'export': await saveNow(); return dlgExport();
     case 'json': await saveNow(); return saveFile(`SAUVEGARDE_${safe(S.rep.csps)}_${S.rep.year}-${pad2(S.rep.month)}.json`, JSON.stringify({ app: 'sigl-meg', version: 1, reports: [S.rep] }), 'application/json');
     case 'backup': { const reports = await DB.reports(); return saveFile(`SAUVEGARDE_SIGL_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({ app: 'sigl-meg', version: 1, full: true, catalog: S.catalog, settings: S.settings, reports }), 'application/json'); }
