@@ -31,3 +31,7 @@ En local (PC avec Node 22 + JDK 21 + Android Studio) : `npm install && npm run a
 - Ensuite, les prix sont en lecture seule (🔒) dans le catalogue et dans la fiche produit ✎ : il faut le mot de passe pour les modifier (déverrouillage valable 10 minutes). La restauration d'un catalogue depuis une sauvegarde le demande aussi, et les rapports importés reprennent les prix du catalogue local.
 - Le mot de passe ne peut pas être récupéré : conservez-le. Pour le fixer d'avance sur tous les appareils : `node tools/mdp.js "MonMotDePasse" > www/config.js`, puis reconstruire (GitHub Actions).
 - Limite : la protection est dans l'application ; elle n'empêche pas de modifier un fichier Excel déjà exporté.
+
+
+## Réceptions (commandes reçues)
+Bouton **📦 Réceptions** en haut du rapport : une réception = une date, un n° de bon et une liste de produits avec quantités. Plusieurs réceptions dans le mois s'additionnent automatiquement dans la colonne « Reçu (B) ». Voir le guide d'utilisation.

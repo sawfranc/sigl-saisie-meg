@@ -235,10 +235,10 @@ function dlgNew() {
 function viewReport() {
   const r = S.rep;
   $('#app').innerHTML = topbar(`${r.csps}`, `${MONTHS[r.month - 1]} ${r.year} · ${r.days} jours`, true,
-    `<button class="ib" data-act="export" title="Exporter en Excel ou PDF">⬇ Exporter</button>`) +
+    `<button class="ib" data-act="recs" title="Réceptions (commandes reçues)">📦 <span class="lbl">Réceptions</span><b id="rcn"></b></button><button class="ib" data-act="export" title="Exporter en Excel ou PDF">⬇ Exporter</button>`) +
     `<div id="pane"></div>
     <nav class="tabs"><button data-tab="prod"><span>💊</span>Produits</button><button data-tab="bilan"><span>📊</span>Bilan</button><button data-tab="infos"><span>📝</span>Infos</button></nav>`;
-  renderTab();
+  renderTab(); rcBadge();
 }
 function renderTab() {
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
@@ -276,7 +276,7 @@ function rowHTML(it) {
   const r = S.rep, v = r.v[it.id] || {};
   return `<div class="row ${it.free ? 'free' : ''}" data-id="${it.id}">
     <div class="nm"><div class="n"><b>${esc(it.name)}</b><small>${esc(it.unit)}${it.pu ? ' · ' + fmt(it.pu, 2) + ' F' : ''}${it.tr ? ' · traceur' : ''}</small></div><button class="ed" data-edit="${it.id}" aria-label="Modifier le produit">✎</button></div>
-    <div class="fields">${FIELDS.map(([k, l]) => `<label class="${k === 'fin' ? 'fin' : ''}"><span>${l}</span><input data-k="${k}" inputmode="decimal" autocomplete="off" value="${v[k] == null ? '' : String(v[k]).replace('.', ',')}"></label>`).join('')}</div>
+    <div class="fields">${FIELDS.map(([k, l]) => { const n = k === 'rec' ? rcCount(r, it.id) : 0; return `<label class="${k === 'fin' ? 'fin' : ''}${n ? ' rcv' : ''}"><span>${l}</span><input data-k="${k}" inputmode="decimal" autocomplete="off" enterkeyhint="next" value="${v[k] == null ? '' : String(v[k]).replace('.', ',')}">${n ? `<button type="button" class="rcb" data-rcp="${it.id}" title="${n} réception(s) : voir le détail">📦${n}</button>` : ''}</label>`; }).join('')}</div>
     <div class="calc"><div><small>Consommé</small><b data-o="cons"></b></div><div><small>Conso. ajustée</small><b data-o="adj"></b></div><div><small>À commander</small><b data-o="cmd"></b></div></div>
     <div class="flag" hidden></div></div>`;
 }
@@ -321,6 +321,7 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('focusin', e => { if (e.target.matches('input[data-k]')) setTimeout(() => e.target.select(), 0); });
 document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && S.rep && S.tab === 'prod' && $('#q')) { e.preventDefault(); $('#q').focus(); $('#q').select(); return; }
   const inp = e.target.closest && e.target.closest('input[data-k]'); if (!inp) return;
   const all = [...document.querySelectorAll('#list input[data-k]')], i = all.indexOf(inp);
   let t = null;
@@ -328,6 +329,103 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { const d = e.key === 'ArrowDown' ? 1 : -1; t = all[i + d * FIELDS.length]; }
   if (t) { e.preventDefault(); t.focus(); t.scrollIntoView({ block: 'center', behavior: 'smooth' }); } else if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
 });
+
+/* ---------- réceptions : une ou plusieurs commandes reçues dans le mois ---------- */
+const fd = iso => iso ? iso.split('-').reverse().join('/') : '—';
+const todayISO = () => { const n = new Date(); return `${n.getFullYear()}-${pad2(n.getMonth() + 1)}-${pad2(n.getDate())}`; };
+const norm = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const rcCount = (r, pid) => (r.recs || []).reduce((n, x) => n + (x.lines.some(l => l.pid === pid) ? 1 : 0), 0);
+const recSums = r => { const s = {}; for (const x of r.recs || []) for (const l of x.lines) s[l.pid] = (s[l.pid] || 0) + N(l.qty); return s; };
+/* applique un changement de réceptions et répercute la différence dans la colonne « Reçu » (B) */
+function applyRecs(r, mutate) {
+  const before = recSums(r); r.recs ||= []; mutate(r.recs); const after = recSums(r);
+  for (const pid of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    const d = N(after[pid]) - N(before[pid]); if (!d) continue;
+    const v = (r.v[pid] ||= {}), nv = Math.round((N(v.rec) + d) * 1e4) / 1e4;
+    if (nv === 0 && !after[pid]) delete v.rec; else v.rec = nv;
+    if (!Object.keys(v).length) delete r.v[pid];
+  }
+}
+function rcBadge() { const e = $('#rcn'); if (e && S.rep) { const n = (S.rep.recs || []).length; e.textContent = n ? ' ' + n : ''; } }
+function rcRefresh() { rcBadge(); if (S.tab === 'prod' && $('#list')) renderList(false); }
+
+function dlgRecs() {
+  const d = $('#dlg3'), r = S.rep, recs = (r.recs || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const grand = recs.reduce((n, x) => n + x.lines.length, 0);
+  d.className = 'big';
+  d.innerHTML = `<div class="dh">📦 Réceptions · ${MONTHS[r.month - 1]} ${r.year}</div><div class="db">
+    <p class="mut" style="margin:0 0 10px">Enregistrez chaque commande reçue (bon de livraison). La colonne <b>Reçu (B)</b> de chaque produit est mise à jour automatiquement : plusieurs réceptions s'additionnent.</p>
+    ${recs.length ? recs.map(x => `<div class="cat-item" data-rc="${x.id}"><div class="n"><b>${fd(x.date)} · ${esc(x.ref || 'sans n° de bon')}</b><small>${x.lines.length} produit(s)${x.note ? ' · ' + esc(x.note) : ''}</small></div><span class="mut">✎</span></div>`).join('') + `<p class="mut" style="text-align:center;margin:12px 0 0">${recs.length} réception(s) · ${grand} ligne(s)</p>` : `<div class="empty">Aucune réception enregistrée ce mois-ci.</div>`}
+  </div><div class="df"><button class="btn sec" data-x>Fermer</button><button class="btn" data-new>＋ Nouvelle réception</button></div>`;
+  d.querySelector('[data-x]').onclick = () => d.close();
+  d.querySelector('[data-new]').onclick = () => dlgRecEdit();
+  d.querySelectorAll('[data-rc]').forEach(e => e.onclick = () => dlgRecEdit(e.dataset.rc));
+  d.onclose = () => rcRefresh();
+  if (!d.open) d.showModal();
+}
+
+function dlgRecEdit(id) {
+  const d = $('#dlg3'), r = S.rep, old = id ? (r.recs || []).find(x => x.id === id) : null;
+  const ed = old ? JSON.parse(JSON.stringify(old)) : { id: 'rc' + Date.now().toString(36), date: todayISO(), ref: '', note: '', lines: [] };
+  const first = JSON.stringify(ed), byId = new Map(r.items.map(i => [i.id, i]));
+  d.className = 'big';
+  d.innerHTML = `<div class="dh">${old ? 'Modifier la réception' : 'Nouvelle réception'}</div><div class="db rcedit">
+    <div class="fm g2"><label>Date de réception<input id="rc-d" type="date" value="${ed.date}"></label><label>N° du bon / de la commande<input id="rc-r" value="${esc(ed.ref)}" placeholder="ex. BL 0123" autocomplete="off"></label></div>
+    <p id="rc-w" class="flag" hidden></p>
+    <label class="srch">Ajouter un produit reçu<input id="rc-q" type="search" placeholder="Tapez le nom du produit…" autocomplete="off" enterkeyhint="done"></label>
+    <div id="rc-s" class="sug"></div>
+    <div id="rc-l"></div>
+  </div><div class="df">${old ? '<button class="btn bad" data-del style="margin-right:auto">Supprimer</button>' : ''}<button class="btn sec" data-x>Retour</button><button class="btn" data-ok>Enregistrer</button></div>`;
+  const q = d.querySelector('#rc-q'), L = d.querySelector('#rc-l'), SG = d.querySelector('#rc-s');
+  const total = () => ed.lines.reduce((n, l) => n + N(l.qty), 0);
+  function drawLines() {
+    L.innerHTML = ed.lines.length ? `<div class="rc-h"><b>${ed.lines.length} produit(s) dans cette réception</b><span id="rc-t" class="mut"></span></div>` + ed.lines.map(l => { const it = byId.get(l.pid); return `<div class="rc-line" data-p="${l.pid}"><div class="n"><b>${esc(it ? it.name : l.pid)}</b><small>${esc(it ? it.unit : '')}</small></div><input data-q="${l.pid}" inputmode="decimal" autocomplete="off" enterkeyhint="next" placeholder="Qté" value="${l.qty == null ? '' : String(l.qty).replace('.', ',')}"><button type="button" class="ed" data-rm="${l.pid}" aria-label="Retirer">✕</button></div>`; }).join('') : `<div class="empty" style="padding:18px">Aucun produit pour l'instant.<br>Recherchez-en un ci-dessus.</div>`;
+    sum();
+  }
+  function sum() { const t = d.querySelector('#rc-t'); if (t) t.textContent = 'Total : ' + fmt(total(), 2) + ' unités'; }
+  function sug() {
+    const toks = norm(q.value).split(/\s+/).filter(Boolean);
+    if (!toks.length) { SG.innerHTML = ''; return []; }
+    const m = r.items.filter(i => { const n = norm(i.name); return toks.every(t => n.includes(t)); }).slice(0, 8);
+    SG.innerHTML = m.length ? m.map(i => `<button type="button" data-add="${i.id}"><b>${esc(i.name)}</b><small>${esc(i.unit)}${ed.lines.some(l => l.pid === i.id) ? ' · déjà ajouté' : ''}</small></button>`).join('') : `<div class="mut" style="padding:8px">Aucun produit trouvé.</div>`;
+    return m;
+  }
+  function add(pid) {
+    if (!ed.lines.some(l => l.pid === pid)) ed.lines.unshift({ pid, qty: null });
+    q.value = ''; SG.innerHTML = ''; drawLines();
+    const inp = L.querySelector(`[data-q="${pid}"]`); if (inp) { inp.focus(); inp.select(); }
+  }
+  q.oninput = sug;
+  q.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); const m = sug(); if (m[0]) add(m[0].id); } };
+  SG.onclick = e => { const b = e.target.closest('[data-add]'); if (b) add(b.dataset.add); };
+  L.oninput = e => { const i = e.target.closest('[data-q]'); if (!i) return; const l = ed.lines.find(x => x.pid === i.dataset.q); l.qty = num(i.value); i.classList.toggle('bad', i.value.trim() !== '' && l.qty == null); sum(); };
+  L.onfocusin = e => { if (e.target.matches('[data-q]')) setTimeout(() => e.target.select(), 0); };
+  L.onkeydown = e => { if (e.key === 'Enter' && e.target.matches('[data-q]')) { e.preventDefault(); q.focus(); } };
+  L.onclick = e => { const b = e.target.closest('[data-rm]'); if (b) { ed.lines = ed.lines.filter(l => l.pid !== b.dataset.rm); drawLines(); } };
+  const chkDate = () => { const v = d.querySelector('#rc-d').value, w = d.querySelector('#rc-w'), ok = !v || v.slice(0, 7) === `${r.year}-${pad2(r.month)}`; w.hidden = ok; w.textContent = ok ? '' : `⚠ Cette date n'est pas dans ${MONTHS[r.month - 1].toLowerCase()} ${r.year}.`; };
+  d.querySelector('#rc-d').oninput = chkDate; chkDate();
+  const back = () => { if (JSON.stringify({ ...ed, date: d.querySelector('#rc-d').value, ref: d.querySelector('#rc-r').value.trim() }) !== first && ed.lines.length && !confirm('Abandonner les modifications de cette réception ?')) return; dlgRecs(); };
+  d.querySelector('[data-x]').onclick = back;
+  const del = d.querySelector('[data-del]');
+  if (del) del.onclick = async () => { if (!confirm('Supprimer cette réception ? Les quantités seront retirées de la colonne « Reçu ».')) return; applyRecs(r, a => { const i = a.findIndex(x => x.id === ed.id); if (i >= 0) a.splice(i, 1); }); await saveNow(); toast('Réception supprimée'); dlgRecs(); };
+  d.querySelector('[data-ok]').onclick = async () => {
+    ed.date = d.querySelector('#rc-d').value; ed.ref = d.querySelector('#rc-r').value.trim();
+    if (!ed.date) return toast('Indiquez la date de réception');
+    if (!ed.lines.length) return toast('Ajoutez au moins un produit');
+    const miss = ed.lines.find(l => !(l.qty > 0));
+    if (miss) { const i = L.querySelector(`[data-q="${miss.pid}"]`); i.classList.add('bad'); i.focus(); return toast('Quantité à renseigner (supérieure à 0)'); }
+    if (ed.ref && (r.recs || []).some(x => x.id !== ed.id && norm(x.ref) === norm(ed.ref)) && !confirm(`Une réception « ${ed.ref} » existe déjà. Enregistrer quand même (risque de doublon) ?`)) return;
+    applyRecs(r, a => { const i = a.findIndex(x => x.id === ed.id); if (i >= 0) a[i] = ed; else a.push(ed); });
+    await saveNow(); toast(old ? 'Réception modifiée' : 'Réception enregistrée'); dlgRecs();
+  };
+  drawLines(); if (!d.open) d.showModal(); if (!old) setTimeout(() => q.focus(), 60);
+}
+function dlgRecProd(pid) {
+  const r = S.rep, it = r.items.find(x => x.id === pid), v = r.v[pid] || {};
+  const rows = (r.recs || []).map(x => ({ x, l: x.lines.find(l => l.pid === pid) })).filter(o => o.l).sort((a, b) => (a.x.date || '').localeCompare(b.x.date || ''));
+  const s = rows.reduce((n, o) => n + N(o.l.qty), 0), hand = Math.round((N(v.rec) - s) * 1e4) / 1e4;
+  dlgInfo(`<div class="dh">${esc(it.name)}</div><div class="db"><table class="t">${rows.map(o => `<tr><td>${fd(o.x.date)} · ${esc(o.x.ref || 'sans n°')}</td><td>${fmt(o.l.qty, 2)}</td></tr>`).join('')}${hand ? `<tr><td>Saisi directement dans « Reçu »</td><td>${fmt(hand, 2)}</td></tr>` : ''}<tr><td><b>Total reçu (B)</b></td><td><b>${fmt(N(v.rec), 2)}</b></td></tr></table><p class="mut">Pour modifier : ouvrez « 📦 Réceptions » en haut de l'écran.</p></div>`);
+}
 
 /* ---------- onglet Bilan ---------- */
 function paneBilan() {
@@ -451,7 +549,7 @@ function viewSettings() {
       <div class="row-btns" style="margin:0">${hasPw() ? `<button class="btn sec" data-act="pwchange">Changer le mot de passe</button>${s.pw ? '<button class="btn sec" data-act="pwremove">Retirer le mot de passe</button>' : ''}${!isLocked() ? '<button class="btn sec" data-act="pwlock">Verrouiller maintenant</button>' : ''}` : '<button class="btn" data-act="pwset">Définir un mot de passe</button>'}</div></div>
     <div class="card"><h2>Données</h2><p class="mut" style="margin-top:0">Les données restent sur cet appareil. Faites régulièrement une sauvegarde et transmettez-la au district (WhatsApp, e-mail, clé USB).</p>
       <div class="row-btns" style="margin:0"><button class="btn" data-act="backup">Sauvegarder tout (JSON)</button><button class="btn sec" data-act="import">Restaurer / importer</button><button class="btn sec" data-act="catalog">Catalogue des produits</button></div></div>
-    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.3 · fonctionne sans connexion</p></div>`;
+    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.4 · fonctionne sans connexion</p></div>`;
   ['s-d', 's-r', 's-rate'].forEach(i => $('#' + i).addEventListener('change', () => { s.district = $('#s-d').value.trim(); s.region = $('#s-r').value.trim(); s.rate = N(num($('#s-rate').value)); saveSettings(); toast('Enregistré'); }));
 }
 
@@ -723,11 +821,12 @@ function pickFile() { const i = document.createElement('input'); i.type = 'file'
 
 /* ---------- actions (clics) ---------- */
 document.addEventListener('click', async e => {
-  const el = e.target.closest('[data-act],[data-open],[data-tab],[data-filter],[data-edit],[data-cedit]'); if (!el) return;
+  const el = e.target.closest('[data-act],[data-open],[data-tab],[data-filter],[data-edit],[data-cedit],[data-rcp]'); if (!el) return;
   const d = el.dataset;
   if (d.open) return go('/r/' + encodeURIComponent(d.open));
   if (d.tab) { S.tab = d.tab; return renderTab(); }
   if (d.filter) { S.filter = d.filter; return paneProducts(); }
+  if (d.rcp) { e.preventDefault(); return dlgRecProd(d.rcp); }
   if (d.edit) return dlgProduct(d.edit, true);
   if (d.cedit) return dlgProduct(d.cedit);
   switch (d.act) {
@@ -742,6 +841,7 @@ document.addEventListener('click', async e => {
     case 'settings': return go('/reglages');
     case 'addprod': return dlgProduct();
     case 'more': S.shown += PAGE; { const y = scrollY; renderList(false); scrollTo(0, y); } return;
+    case 'recs': return dlgRecs();
     case 'export': await saveNow(); return dlgExport();
     case 'json': await saveNow(); return saveFile(`SAUVEGARDE_${safe(S.rep.csps)}_${S.rep.year}-${pad2(S.rep.month)}.json`, JSON.stringify({ app: 'sigl-meg', version: 1, reports: [S.rep] }), 'application/json');
     case 'backup': { const reports = await DB.reports(); return saveFile(`SAUVEGARDE_SIGL_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({ app: 'sigl-meg', version: 1, full: true, catalog: S.catalog, settings: S.settings, reports }), 'application/json'); }
