@@ -1,7 +1,7 @@
 {
   "name": "sigl-saisie-meg",
   "productName": "SIGL Saisie MEG",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Saisie du rapport de gestion et de commande des produits de santé (SIGL) – CSPS",
   "main": "electron/main.js",
   "scripts": {

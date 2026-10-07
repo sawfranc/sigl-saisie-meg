@@ -450,7 +450,7 @@ function viewSettings() {
       <div class="row-btns" style="margin:0">${hasPw() ? `<button class="btn sec" data-act="pwchange">Changer le mot de passe</button>${s.pw ? '<button class="btn sec" data-act="pwremove">Retirer le mot de passe</button>' : ''}${!isLocked() ? '<button class="btn sec" data-act="pwlock">Verrouiller maintenant</button>' : ''}` : '<button class="btn" data-act="pwset">Définir un mot de passe</button>'}</div></div>
     <div class="card"><h2>Données</h2><p class="mut" style="margin-top:0">Les données restent sur cet appareil. Faites régulièrement une sauvegarde et transmettez-la au district (WhatsApp, e-mail, clé USB).</p>
       <div class="row-btns" style="margin:0"><button class="btn" data-act="backup">Sauvegarder tout (JSON)</button><button class="btn sec" data-act="import">Restaurer / importer</button><button class="btn sec" data-act="catalog">Catalogue des produits</button></div></div>
-    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.2 · fonctionne sans connexion</p></div>`;
+    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.2.1 · fonctionne sans connexion</p></div>`;
   ['s-d', 's-r', 's-rate'].forEach(i => $('#' + i).addEventListener('change', () => { s.district = $('#s-d').value.trim(); s.region = $('#s-r').value.trim(); s.rate = N(num($('#s-rate').value)); saveSettings(); toast('Enregistré'); }));
 }
 
@@ -509,7 +509,7 @@ function exportXlsx(r) {
   const hs = { font: { bold: true, sz: 10 }, fill: { fgColor: { rgb: 'D9EAD3' } }, alignment: { wrapText: true, vertical: 'center', horizontal: 'center' }, border: bd };
   const bold = { font: { bold: true } }, catS = { font: { bold: true }, fill: { fgColor: { rgb: 'FABF8F' } }, border: bd };
   const NUM = { border: bd, numFmt: '#,##0.##' };
-  const sheet = () => { const ws = {}; return { ws, put(c, row, v, o = {}) { if ((v == null || v === '') && !o.s && !o.f) return; if (v == null) v = ''; ws[X.utils.encode_cell({ c, r: row - 1 })] = Object.assign({ v, t: typeof v === 'number' ? 'n' : 's' }, o); } }; };
+  const sheet = () => { const ws = {}; return { ws, put(c, row, v, o = {}) { const addr = X.utils.encode_cell({ c, r: row - 1 }); if ((v == null || v === '') && !o.f) { if (o.s) ws[addr] = { t: 'z', s: o.s }; return; } ws[addr] = Object.assign({ v, t: typeof v === 'number' ? 'n' : 's' }, o); } }; };
   const finish = (ws, maxc, maxr, cols, extra) => { ws['!ref'] = X.utils.encode_range({ s: { c: 0, r: 0 }, e: { c: maxc, r: maxr } }); ws['!cols'] = cols; Object.assign(ws, extra || {}); return ws; };
   const dd = r.date ? r.date.split('-').reverse().join(' / ') : '';
   const head = (S, mid) => {
