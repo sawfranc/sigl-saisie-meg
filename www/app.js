@@ -557,7 +557,7 @@ function viewSettings() {
       <div class="row-btns" style="margin:0">${hasPw() ? `<button class="btn sec" data-act="pwchange">Changer le mot de passe</button>${s.pw ? '<button class="btn sec" data-act="pwremove">Retirer le mot de passe</button>' : ''}${!isLocked() ? '<button class="btn sec" data-act="pwlock">Verrouiller maintenant</button>' : ''}` : '<button class="btn" data-act="pwset">Définir un mot de passe</button>'}</div></div>
     <div class="card"><h2>Données</h2><p class="mut" style="margin-top:0">Les données restent sur cet appareil. Faites régulièrement une sauvegarde et transmettez-la au district (WhatsApp, e-mail, clé USB).</p>
       <div class="row-btns" style="margin:0"><button class="btn" data-act="backup">Sauvegarder tout (JSON)</button><button class="btn sec" data-act="import">Restaurer / importer</button><button class="btn sec" data-act="catalog">Catalogue des produits</button></div></div>
-    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.5.1 · fonctionne sans connexion</p></div>`;
+    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.5.2 · fonctionne sans connexion</p></div>`;
   ['s-d', 's-r', 's-rate'].forEach(i => $('#' + i).addEventListener('change', () => { s.district = $('#s-d').value.trim(); s.region = $('#s-r').value.trim(); s.rate = N(num($('#s-rate').value)); saveSettings(); toast('Enregistré'); }));
 }
 
@@ -605,11 +605,11 @@ function engine(r) {
   const src = (t, g, col) => g === 'G' ? sigl(t, col) : (t <= 163 ? syn(t, col) : sigl(t - 152, col));
   const syn = (n, col) => { const k = 's' + n + col; if (k in memo) return memo[k]; const e = SYN[n]; let s = 0; if (e && e.t) e.t.forEach((t, i) => s += src(t, e.g[i], col)); return memo[k] = s; };
   const rma = (n, col) => { const e = RMAM[n]; let s = 0; if (e && e.t) e.t.forEach(t => s += src(t, 'S', col === 'L' ? 'M' : col)); return s; };
-  const refText = (t, g, col, local) => g === 'G' ? `SIGL!${col}${t}` : (t <= 163 ? (local ? `${col}${t}` : `SYNTHESE!${col}${t}`) : `SIGL!${col}${t - 152}`);
+  const refText = (t, g, col, local) => g === 'G' ? `SIGL_General!${col}${t}` : (t <= 163 ? (local ? `${col}${t}` : `Rapport_SIGL!${col}${t}`) : `SIGL_General!${col}${t - 152}`);
   return { P, sigl, syn, rma, refText };
 }
 
-/* ---------- export Excel : 3 feuilles SIGL + SYNTHESE + RMA ---------- */
+/* ---------- export Excel : 3 feuilles SIGL_General + Rapport_SIGL + RMA ---------- */
 function exportXlsx(r) {
   const X = XLSX, E = engine(r), t = totals(r), P = E.P, first = 13, tot = P.tot, last = tot - 1, n = r.items.length;
   const thin = { style: 'thin', color: { rgb: '999999' } }, bd = { top: thin, bottom: thin, left: thin, right: thin };
@@ -699,7 +699,7 @@ function exportXlsx(r) {
   finish(rs, 11, rr2, [{ wch: 58 }, { wch: 16 }, ...Array(10).fill({ wch: 13 })], { '!merges': rm, '!rows': (() => { const a = []; a[4] = { hpt: 48 }; return a; })() });
 
   const wb = X.utils.book_new();
-  X.utils.book_append_sheet(wb, g, 'SIGL'); X.utils.book_append_sheet(wb, y, 'SYNTHESE'); X.utils.book_append_sheet(wb, rs, 'RMA');
+  X.utils.book_append_sheet(wb, g, 'SIGL_General'); X.utils.book_append_sheet(wb, y, 'Rapport_SIGL'); X.utils.book_append_sheet(wb, rs, 'RMA');
   const out = X.write(wb, { bookType: 'xlsx', type: 'array' });
   saveFile(`SIGL_${safe(r.csps)}_${r.year}-${pad2(r.month)}.xlsx`, new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
 }
@@ -840,7 +840,7 @@ function dlgExport() {
   const d = $('#dlg');
   d.innerHTML = `<div class="dh">Exporter le rapport</div><div class="db"><div class="fm">
     <button class="btn sec" data-pre style="border-width:2px">👁 Aperçu avant export</button>
-    <button class="btn" data-ex="xlsx">📗 Excel — 3 feuilles : SIGL, SYNTHESE, RMA</button>
+    <button class="btn" data-ex="xlsx">📗 Excel — 3 feuilles : SIGL_General, Rapport_SIGL, RMA</button>
     <div class="mut" style="font-weight:700;margin-top:4px">PDF (A4 paysage)</div>
     <button class="btn sec" data-ex="pdf:sigl,bilan:SIGL">📕 SIGL + bilan</button>
     <button class="btn sec" data-ex="pdf:syn:SYNTHESE">📕 SYNTHESE</button>
