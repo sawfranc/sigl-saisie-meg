@@ -576,7 +576,7 @@ function viewSettings() {
       <div class="row-btns" style="margin:0">${hasPw() ? `<button class="btn sec" data-act="pwchange">Changer le mot de passe</button>${s.pw ? '<button class="btn sec" data-act="pwremove">Retirer le mot de passe</button>' : ''}${!isLocked() ? '<button class="btn sec" data-act="pwlock">Verrouiller maintenant</button>' : ''}` : '<button class="btn" data-act="pwset">Définir un mot de passe</button>'}</div></div>
     <div class="card"><h2>Données</h2><p class="mut" style="margin-top:0">Les données restent sur cet appareil. Faites régulièrement une sauvegarde et transmettez-la au district (WhatsApp, e-mail, clé USB).</p>
       <div class="row-btns" style="margin:0"><button class="btn" data-act="backup">Sauvegarder tout (JSON)</button><button class="btn sec" data-act="import">Restaurer / importer</button><button class="btn sec" data-act="catalog">Catalogue des produits</button>${catOutdated() ? '<button class="btn" data-act="catupdate">💰 Mettre à jour les prix</button>' : ''}</div></div>
-    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.6.0 · fonctionne sans connexion</p></div>`;
+    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.6.1 · fonctionne sans connexion</p></div>`;
   ['s-d', 's-r', 's-rate'].forEach(i => $('#' + i).addEventListener('change', () => { s.district = $('#s-d').value.trim(); s.region = $('#s-r').value.trim(); s.rate = N(num($('#s-rate').value)); saveSettings(); toast('Enregistré'); }));
 }
 
@@ -689,7 +689,7 @@ function exportXlsx(r) {
   [['Préparé par', 'prep'], ['Approuvé par', 'appr'], ['Reçu au District par', 'recu']].forEach(([l, k]) => { G.put(0, row, l, { s: bold }); G.put(1, row, r.sign[k].nom); G.put(3, row, r.sign[k].fonc); G.put(4, row, r.sign[k].tel); row++; });
   finish(g, 22, row, [{ wch: 52 }, { wch: 14 }, ...Array(19).fill({ wch: 14 }), { wch: 18 }, { wch: 9 }], { '!rows': (() => { const a = []; a[7] = { hpt: 78 }; a[11] = { hpt: 78 }; return a; })() });
 
-  /* ===== feuille SYNTHESE (regroupement par programme) ===== */
+  /* ===== feuille Rapport_SIGL (regroupement par programme) ===== */
   const Y = sheet(), y = Y.ws; head(Y, true);
   H.slice(0, 13).forEach((h, c) => Y.put(c, 8, h, { s: hs })); LET.forEach((l, c) => Y.put(c, 9, l, { s: hs }));
   const merges = []; let maxY = 11;
@@ -721,7 +721,7 @@ function exportXlsx(r) {
   const wb = X.utils.book_new();
   X.utils.book_append_sheet(wb, g, 'SIGL_General'); X.utils.book_append_sheet(wb, y, 'Rapport_SIGL'); X.utils.book_append_sheet(wb, rs, 'RMA');
   const out = X.write(wb, { bookType: 'xlsx', type: 'array' });
-  saveFile(`SIGL_${safe(r.csps)}_${r.year}-${pad2(r.month)}.xlsx`, new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  saveFile(`GESTION_DEPOT_MEG_${safe(r.csps)}_${r.year}-${pad2(r.month)}.xlsx`, new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
 }
 
 /* ---------- export PDF : SIGL + bilan + RMA ---------- */
@@ -792,7 +792,7 @@ function exportPdf(r, onlyFilled, parts, tag) {
 
   // 3) SYNTHESE
   if (has('syn')) {
-    newPage('SYNTHESE PAR PROGRAMME - RAPPORT DE GESTION ET DE COMMANDE DES PRODUITS DE SANTE');
+    newPage('RAPPORT SIGL PAR PROGRAMME - RAPPORT DE GESTION ET DE COMMANDE DES PRODUITS DE SANTE');
     grouped(window.MAPS ? window.MAPS.syn : [], (n, c) => E.syn(n, c), 11, [70, 18, 17.1],
       ['Désignation', 'Unité', 'Début (A)', 'Reçu (B)', 'Consommé (C)', 'Périmé (D)', 'Autres pertes (E)', 'Ajust. - (F-)', 'Ajust. + (F+)', 'Stock fin (G)', 'Jours rupture (H)', 'Conso. ajustée (I)', 'À commander (J)']);
   }
@@ -842,7 +842,7 @@ function previewHTML(r, onlyFilled) {
 }
 function dlgPreview(part) {
   const d = $('#dlg3'), r = S.rep, only = S.pdfFilled !== false, H = previewHTML(r, only);
-  const TABS = [['sigl', 'SIGL'], ['bilan', 'Bilan'], ['syn', 'SYNTHESE'], ['rma', 'RMA']]; part = part || 'sigl';
+  const TABS = [['sigl', 'SIGL_General'], ['bilan', 'Bilan'], ['syn', 'Rapport_SIGL'], ['rma', 'RMA']]; part = part || 'sigl';
   d.className = 'huge';
   d.innerHTML = `<div class="dh">Aperçu avant export · ${esc(r.csps)} · ${MONTHS[r.month - 1]} ${r.year}</div>
     <div class="pvtabs">${TABS.map(([k, l]) => `<button class="chip ${k === part ? 'on' : ''}" data-pv="${k}">${l}</button>`).join('')}<label class="chk pvchk"><input type="checkbox" id="pv-f" ${only ? 'checked' : ''}> seulement les lignes renseignées</label></div>
@@ -852,7 +852,7 @@ function dlgPreview(part) {
   d.querySelector('#pv-f').onchange = e => { S.pdfFilled = e.target.checked; dlgPreview(part); };
   d.querySelector('[data-x]').onclick = () => { d.close(); dlgExport(); };
   d.querySelector('[data-xl]').onclick = () => { d.close(); try { exportXlsx(r); } catch (e) { alert("Erreur pendant l'export : " + (e && e.message || e)); } };
-  d.querySelector('[data-pdf]').onclick = () => { const tag = { sigl: 'SIGL', bilan: 'BILAN', syn: 'SYNTHESE', rma: 'RMA' }[part]; d.close(); try { exportPdf(r, S.pdfFilled !== false, [part], tag); } catch (e) { alert("Erreur pendant l'export : " + (e && e.message || e)); } };
+  d.querySelector('[data-pdf]').onclick = () => { const tag = { sigl: 'SIGL_General', bilan: 'Bilan', syn: 'Rapport_SIGL', rma: 'RMA' }[part]; d.close(); try { exportPdf(r, S.pdfFilled !== false, [part], tag); } catch (e) { alert("Erreur pendant l'export : " + (e && e.message || e)); } };
   d.onclose = null; if (!d.open) d.showModal();
 }
 
@@ -862,10 +862,10 @@ function dlgExport() {
     <button class="btn sec" data-pre style="border-width:2px">👁 Aperçu avant export</button>
     <button class="btn" data-ex="xlsx">📗 Excel — 3 feuilles : SIGL_General, Rapport_SIGL, RMA</button>
     <div class="mut" style="font-weight:700;margin-top:4px">PDF (A4 paysage)</div>
-    <button class="btn sec" data-ex="pdf:sigl,bilan:SIGL">📕 SIGL + bilan</button>
-    <button class="btn sec" data-ex="pdf:syn:SYNTHESE">📕 SYNTHESE</button>
+    <button class="btn sec" data-ex="pdf:sigl,bilan:SIGL_General">📕 SIGL_General + bilan</button>
+    <button class="btn sec" data-ex="pdf:syn:Rapport_SIGL">📕 Rapport_SIGL</button>
     <button class="btn sec" data-ex="pdf:rma:RMA">📕 RMA</button>
-    <button class="btn sec" data-ex="pdf:sigl,bilan,syn,rma:COMPLET">📕 Tout en un seul PDF</button>
+    <button class="btn sec" data-ex="pdf:sigl,bilan,syn,rma:GESTION_DEPOT_MEG">📕 Tout en un seul PDF</button>
     <label class="chk"><input type="checkbox" id="ex-filled" ${S.pdfFilled === false ? '' : 'checked'}> PDF : seulement les lignes renseignées</label>
     <p class="mut" style="margin:0">Excel : les formules sont conservées, les trois feuilles sont liées comme dans votre classeur.</p></div></div>
     <div class="df"><button class="btn sec" data-x>Fermer</button></div>`;
