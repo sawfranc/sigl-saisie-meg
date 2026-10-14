@@ -38,9 +38,26 @@ let saveTimer = null;
 
 async function loadAll() {
   S.settings = Object.assign({}, DEFAULTS, await DB.get('settings'));
-  S.catalog = (await DB.get('catalog')) || JSON.parse(JSON.stringify(window.CATALOG));
-  if (!(await DB.get('catalog'))) await DB.set('catalog', S.catalog);
+  const hadCat = await DB.get('catalog');
+  S.catalog = hadCat || JSON.parse(JSON.stringify(window.CATALOG));
+  if (!hadCat) await DB.set('catalog', S.catalog);
   S.reports = (await DB.reports()) || [];
+  if (!hadCat && window.CATALOG_VERSION) { S.settings.catVersion = window.CATALOG_VERSION; await saveSettings(); }
+}
+const catOutdated = () => !!window.CATALOG_VERSION && S.settings.catVersion !== window.CATALOG_VERSION;
+async function catUpdate() {
+  if (!catOutdated()) return toast('Les prix sont déjà à jour');
+  if (hasPw()) { if (!(await needUnlock('Mot de passe administrateur pour mettre à jour les prix'))) return; }
+  else if (!confirm('Mettre à jour les prix du catalogue ?')) return;
+  let up = 0, add = 0;
+  for (const c of window.CATALOG) {
+    const i = S.catalog.find(x => x.id === c.id);
+    if (!i) { S.catalog.push({ ...c }); add++; }
+    else if (i.pu !== c.pu || i.drd !== c.drd || (i.arr || '') !== (c.arr || '')) { i.pu = c.pu; i.drd = c.drd; i.arr = c.arr || ''; up++; }
+  }
+  S.settings.catVersion = window.CATALOG_VERSION; await saveCatalog(); await saveSettings();
+  dlgInfo(`<div class="dh">Prix mis à jour</div><div class="db"><p>${up} produit(s) mis à jour, ${add} nouveau(x) produit(x) ajouté(s).</p><p class="mut">Les rapports déjà commencés gardent leurs anciens prix. Pour les appliquer à un rapport : ouvrez-le, onglet Infos, « Mettre à jour les prix ».</p></div>`);
+  route();
 }
 const saveSettings = () => DB.set('settings', S.settings);
 const saveCatalog = () => DB.set('catalog', S.catalog);
@@ -198,6 +215,7 @@ function viewHome() {
   $('#app').innerHTML = topbar('SIGL · Saisie MEG', `District sanitaire de ${S.settings.district}`, false,
     `<button class="ib" data-act="catalog" title="Catalogue produits">💊</button><button class="ib" data-act="settings" title="Réglages">⚙</button>`) +
     `<div class="wrap">
+      ${catOutdated() ? `<div class="card" style="background:var(--warn-l);border-color:#f0c36d"><b>💰 Nouveaux prix disponibles</b><p style="margin:6px 0 10px">Mise à jour du catalogue (prix, n° d'arrêté, nouveaux produits). Mot de passe administrateur demandé.</p><button class="btn" data-act="catupdate">Mettre à jour les prix</button></div>` : ''}
       <div class="row-btns"><button class="btn" data-act="new">＋ Nouveau rapport mensuel</button>
       <button class="btn sec" data-act="import">Importer des données</button></div>
       ${list.length ? list.map(r => { const t = totals(r); const p = Math.round(100 * t.done / r.items.length); return `<div class="card rep" data-open="${esc(r.id)}"><div class="t"><b>${esc(r.csps)} — ${MONTHS[r.month - 1]} ${r.year}</b><small>${t.done}/${r.items.length} produits saisis${t.cat ? ' · CAR/CAT ' + fmt(t.ratio * 100, 1) + ' %' : ''}</small><div class="bar"><i style="width:${p}%"></i></div></div><span class="mut">›</span></div>`; }).join('')
@@ -521,19 +539,20 @@ function drawCatalog() {
 document.addEventListener('input', e => { if (e.target.id === 'cq') { cq = e.target.value; drawCatalog(); } });
 
 function dlgProduct(id) {
-  const c = id ? S.catalog.find(x => x.id === id) : { id: uid(), name: '', unit: '', pu: 0, drd: 0, free: false, tr: false };
+  const c = id ? S.catalog.find(x => x.id === id) : { id: uid(), name: '', unit: '', pu: 0, drd: 0, arr: '', free: false, tr: false };
   dlg(`<div class="dh">${id ? 'Modifier le produit' : 'Nouveau produit'}</div><div class="db"><div class="fm">
     <label>Désignation<input id="p-n" value="${esc(c.name)}"></label>
     <div class="fm g2"><label>Unité de comptage<input id="p-u" value="${esc(c.unit)}"></label><span></span>
     <label>Prix unitaire en CSPS / prix public (F)${isLocked() ? ' 🔒' : ''}<input id="p-pu" inputmode="decimal" ${isLocked() ? 'readonly' : ''} value="${String(c.pu).replace('.', ',')}"></label>
-    <label>Prix DRD (F)${isLocked() ? ' 🔒' : ''}<input id="p-drd" inputmode="decimal" ${isLocked() ? 'readonly' : ''} value="${String(c.drd).replace('.', ',')}"></label></div>
+    <label>Prix DRD (F)${isLocked() ? ' 🔒' : ''}<input id="p-drd" inputmode="decimal" ${isLocked() ? 'readonly' : ''} value="${String(c.drd).replace('.', ',')}"></label>
+    <label>N° arrêté (rapprochement prix)${isLocked() ? ' 🔒' : ''}<input id="p-arr" ${isLocked() ? 'readonly' : ''} value="${esc(c.arr || '')}"></label></div>
     ${isLocked() ? '<button class="btn sec sm" id="p-unlock" style="justify-self:start">🔒 Déverrouiller les prix (mot de passe)</button>' : (hasPw() ? '' : '<p class="mut" style="margin:0">Les prix ne sont protégés par aucun mot de passe : voir Réglages › Sécurité.</p>')}
     <label class="chk"><input type="checkbox" id="p-free" ${c.free ? 'checked' : ''}> Produit gratuit / de programme (prix = 0)</label>
     <label class="chk"><input type="checkbox" id="p-tr" ${c.tr ? 'checked' : ''}> Médicament traceur DMEG</label>
     ${id ? '<button class="btn bad sm" id="p-del" style="justify-self:start">Retirer du catalogue</button>' : ''}</div></div>`,
     async () => {
       const name = $('#p-n').value.trim(); if (!name) { toast('Désignation obligatoire'); return false; }
-      const prices = isLocked() ? { pu: c.pu, drd: c.drd } : { pu: N(num($('#p-pu').value)), drd: N(num($('#p-drd').value)) };
+      const prices = isLocked() ? { pu: c.pu, drd: c.drd, arr: c.arr || '' } : { pu: N(num($('#p-pu').value)), drd: N(num($('#p-drd').value)), arr: $('#p-arr').value.trim() };
       Object.assign(c, { name, unit: $('#p-u').value.trim(), ...prices, free: $('#p-free').checked, tr: $('#p-tr').checked });
       if (!id) S.catalog.push(c);
       await saveCatalog();
@@ -541,7 +560,7 @@ function dlgProduct(id) {
       toast('Produit enregistré'); if (S.rep) { S.tab === 'prod' ? renderList() : renderTab(); } else drawCatalog();
     });
   const ul = $('#p-unlock');
-  if (ul) ul.onclick = async () => { if (await askPw('Saisissez le mot de passe pour modifier les prix')) { $('#p-pu').readOnly = false; $('#p-drd').readOnly = false; ul.remove(); toast('Prix déverrouillés (10 min)'); $('#p-pu').focus(); } };
+  if (ul) ul.onclick = async () => { if (await askPw('Saisissez le mot de passe pour modifier les prix')) { $('#p-pu').readOnly = false; $('#p-drd').readOnly = false; $('#p-arr').readOnly = false; ul.remove(); toast('Prix déverrouillés (10 min)'); $('#p-pu').focus(); } };
   const del = $('#p-del');
   if (del) del.onclick = async () => { if (!confirm('Retirer ce produit du catalogue ? (les rapports déjà créés le conservent)')) return; S.catalog = S.catalog.filter(x => x.id !== id); await saveCatalog(); $('#dlg').close(); drawCatalog(); };
 }
@@ -556,8 +575,8 @@ function viewSettings() {
     <div class="card"><h2>Sécurité des prix</h2><p class="mut" style="margin-top:0">${hasPw() ? (isLocked() ? '🔒 Les prix (CSPS / public et DRD) sont protégés par un mot de passe.' : '🔓 Prix déverrouillés pour quelques minutes.') : 'Aucun mot de passe : les prix peuvent être modifiés par tout utilisateur.'}</p>
       <div class="row-btns" style="margin:0">${hasPw() ? `<button class="btn sec" data-act="pwchange">Changer le mot de passe</button>${s.pw ? '<button class="btn sec" data-act="pwremove">Retirer le mot de passe</button>' : ''}${!isLocked() ? '<button class="btn sec" data-act="pwlock">Verrouiller maintenant</button>' : ''}` : '<button class="btn" data-act="pwset">Définir un mot de passe</button>'}</div></div>
     <div class="card"><h2>Données</h2><p class="mut" style="margin-top:0">Les données restent sur cet appareil. Faites régulièrement une sauvegarde et transmettez-la au district (WhatsApp, e-mail, clé USB).</p>
-      <div class="row-btns" style="margin:0"><button class="btn" data-act="backup">Sauvegarder tout (JSON)</button><button class="btn sec" data-act="import">Restaurer / importer</button><button class="btn sec" data-act="catalog">Catalogue des produits</button></div></div>
-    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.5.2 · fonctionne sans connexion</p></div>`;
+      <div class="row-btns" style="margin:0"><button class="btn" data-act="backup">Sauvegarder tout (JSON)</button><button class="btn sec" data-act="import">Restaurer / importer</button><button class="btn sec" data-act="catalog">Catalogue des produits</button>${catOutdated() ? '<button class="btn" data-act="catupdate">💰 Mettre à jour les prix</button>' : ''}</div></div>
+    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.6.0 · fonctionne sans connexion</p></div>`;
   ['s-d', 's-r', 's-rate'].forEach(i => $('#' + i).addEventListener('change', () => { s.district = $('#s-d').value.trim(); s.region = $('#s-r').value.trim(); s.rate = N(num($('#s-rate').value)); saveSettings(); toast('Enregistré'); }));
 }
 
@@ -586,11 +605,11 @@ function placeItems(r) {
   const rowOf = {}, used = new Set(), extras = [];
   for (const it of r.items) {
     const m = /^p(\d{1,3})$/.exec(it.id), n = m ? +m[1] : 0;
-    if (n >= 13 && n <= 454 && !used.has(n)) { rowOf[it.id] = n; used.add(n); } else extras.push(it);
+    if (n >= 13 && n <= 468 && !used.has(n)) { rowOf[it.id] = n; used.add(n); } else extras.push(it);
   }
-  let nx = 436; for (const it of extras) { while (used.has(nx)) nx++; rowOf[it.id] = nx; used.add(nx); nx++; }
+  let nx = 469; for (const it of extras) { while (used.has(nx)) nx++; rowOf[it.id] = nx; used.add(nx); nx++; }
   const byRow = {}; r.items.forEach(it => byRow[rowOf[it.id]] = it);
-  const last = Math.max(454, ...used);
+  const last = Math.max(468, ...used);
   return { rowOf, byRow, last, tot: last + 1 };
 }
 function engine(r) {
@@ -604,7 +623,7 @@ function engine(r) {
   };
   const src = (t, g, col) => g === 'G' ? sigl(t, col) : (t <= 163 ? syn(t, col) : sigl(t - 152, col));
   const syn = (n, col) => { const k = 's' + n + col; if (k in memo) return memo[k]; const e = SYN[n]; let s = 0; if (e && e.t) e.t.forEach((t, i) => s += src(t, e.g[i], col)); return memo[k] = s; };
-  const rma = (n, col) => { const e = RMAM[n]; let s = 0; if (e && e.t) e.t.forEach(t => s += src(t, 'S', col === 'L' ? 'M' : col)); return s; };
+  const rma = (n, col) => { const e = RMAM[n]; let s = 0; if (e && e.t) e.t.forEach(t => s += src(t, 'G', col === 'L' ? 'M' : col)); return s; };
   const refText = (t, g, col, local) => g === 'G' ? `SIGL_General!${col}${t}` : (t <= 163 ? (local ? `${col}${t}` : `Rapport_SIGL!${col}${t}`) : `SIGL_General!${col}${t - 152}`);
   return { P, sigl, syn, rma, refText };
 }
@@ -629,7 +648,7 @@ function exportXlsx(r) {
     S.put(0, 7, 'RAPPORT DE GESTION ET DE COMMANDE DES PRODUITS DE SANTE', { s: { font: { bold: true, sz: 13 } } });
   };
   const S0 = S.settings;
-  const H = ['Désignation', 'Unité de comptage', 'Quantité disponible et utilisable en début de mois', 'Quantité reçue au cours du mois', 'Quantité consommée au cours du mois', 'Quantité périmée au cours du mois', 'Autres pertes au cours du mois', 'Ajustements (−) au cours du mois', 'Ajustements (+) au cours du mois', 'Quantité disponible et utilisable en fin de mois', 'Nbre de jours de rupture au cours du mois', 'Quantité consommée ajustée du mois', 'Quantité à commander', 'Prix unitaire en CSPS', 'Prix DRD', 'Total vente du mois au prix DRD', 'Total vente du mois aux prix public (DMEG)', 'Valeur stock au début du mois aux prix public (DMEG)', 'Valeur des MEG commandée aux prix public (DMEG)', 'Valeur stock à la fin du mois aux prix public (DMEG)', 'Valeur stock périmé / cassé aux prix public (DMEG)', 'Traceur (1 = oui)'];
+  const H = ['Désignation', 'Unité de comptage', 'Quantité disponible et utilisable en début de mois', 'Quantité reçue au cours du mois', 'Quantité consommée au cours du mois', 'Quantité périmée au cours du mois', 'Autres pertes au cours du mois', 'Ajustements (−) au cours du mois', 'Ajustements (+) au cours du mois', 'Quantité disponible et utilisable en fin de mois', 'Nbre de jours de rupture au cours du mois', 'Quantité consommée ajustée du mois', 'Quantité à commander', 'Prix unitaire en CSPS', 'Prix DRD', 'Total vente du mois au prix DRD', 'Total vente du mois aux prix public (DMEG)', 'Valeur stock au début du mois aux prix public (DMEG)', 'Valeur des MEG commandée aux prix public (DMEG)', 'Valeur stock à la fin du mois aux prix public (DMEG)', 'Valeur stock périmé / cassé aux prix public (DMEG)', 'N° Arrêté_Prix (rapprochement prix)', 'Traceur (1 = oui)'];
   const LET = ['', '', 'A', 'B', 'C', 'D', 'E', 'F-', 'F+', 'G', 'H', 'I', 'J'];
   const COLS = 'ABCDEFGHIJKLMNOPQRSTUV';
 
@@ -649,13 +668,14 @@ function exportXlsx(r) {
     F(12, `IF(L${row}*2-J${row}>=0,L${row}*2-J${row},0)`, c.cmd);
     G.put(13, row, N(it.pu), { s: NUM }); G.put(14, row, N(it.drd), { s: NUM });
     F(15, `E${row}*O${row}`, c.P); F(16, `E${row}*N${row}`, c.Q); F(17, `C${row}*N${row}`, c.R); F(18, `D${row}*N${row}`, c.S); F(19, `J${row}*N${row}`, c.T); F(20, `(F${row}+G${row})*N${row}`, c.U);
-    if (it.tr) G.put(21, row, 1, { s: { border: bd } });
+    if (it.arr) G.put(21, row, it.arr, { s: { border: bd } });
+    if (it.tr) G.put(22, row, 1, { s: { border: bd } });
   });
   G.put(0, tot, 'TOTAL', { s: bold });
   [['D', 3, t.rec], ['P', 15, t.P], ['Q', 16, t.Q], ['R', 17, t.R], ['S', 18, t.S], ['T', 19, t.T], ['U', 20, t.U]].forEach(([L, c, val]) => G.put(c, tot, val, { f: `SUM(${L}${first}:${L}${last})`, s: { font: { bold: true }, numFmt: '#,##0' } }));
   let row = tot + 1;
   const line = (label, val, f) => { G.put(0, row, label); if (val !== undefined) G.put(2, row, val, { f, s: { numFmt: '#,##0.###' } }); return row++; };
-  const hasTr = t.nTr > 0, V = `V${first}:V${last}`, K = `K${first}:K${last}`, Rf = {}, fn = r.fin;
+  const hasTr = t.nTr > 0, V = `W${first}:W${last}`, K = `K${first}:K${last}`, Rf = {}, fn = r.fin;
   line('Taux de rupture des médicaments traceurs DMEG (100 x nbre de traceurs en rupture / nbre de traceurs)', hasTr ? t.tauxRup : '', `IF(SUM(${V})=0,"",100*COUNTIFS(${V},1,${K},">0")/SUM(${V}))`);
   line('Durée moyenne de rupture des médicaments traceurs DMEG (somme des jours de rupture / nbre de traceurs)', hasTr ? t.durRup : '', `IF(SUM(${V})=0,"",SUMIF(${V},1,${K})/SUM(${V}))`);
   [['grat', 'MEG sorties pour la gratuité des soins et la PF'], ['ramu', 'MEG sorties pour le RAMU'], ['fonct', 'MEG sortie pour le fonctionnement du CSPS'], ['caisse', 'Caisse du gérant non encore versé au trésorier'], ['verse', 'Versement effectués au trésorier par le gérant']].forEach(([k, l]) => { Rf[k] = line(l, N(fn[k])); });
@@ -667,11 +687,11 @@ function exportXlsx(r) {
   const rr = line('CAR / CAT', t.ratio == null ? '' : t.ratio, `IFERROR(C${Rf.car}/C${Rf.cat},"")`); G.put(6, rr, '0,98 < N < 1,02');
   row++; G.put(1, row, 'Nom et Prénom', { s: bold }); G.put(3, row, 'Fonction', { s: bold }); G.put(4, row, 'N° Téléphone', { s: bold }); row++;
   [['Préparé par', 'prep'], ['Approuvé par', 'appr'], ['Reçu au District par', 'recu']].forEach(([l, k]) => { G.put(0, row, l, { s: bold }); G.put(1, row, r.sign[k].nom); G.put(3, row, r.sign[k].fonc); G.put(4, row, r.sign[k].tel); row++; });
-  finish(g, 21, row, [{ wch: 52 }, { wch: 14 }, ...Array(19).fill({ wch: 14 }), { wch: 9 }], { '!rows': (() => { const a = []; a[7] = { hpt: 78 }; a[11] = { hpt: 78 }; return a; })() });
+  finish(g, 22, row, [{ wch: 52 }, { wch: 14 }, ...Array(19).fill({ wch: 14 }), { wch: 18 }, { wch: 9 }], { '!rows': (() => { const a = []; a[7] = { hpt: 78 }; a[11] = { hpt: 78 }; return a; })() });
 
   /* ===== feuille SYNTHESE (regroupement par programme) ===== */
   const Y = sheet(), y = Y.ws; head(Y, true);
-  H.slice(0, 13).forEach((h, c) => Y.put(c, 8, h, { s: hs })); LET.forEach((l, c) => Y.put(c, 10, l, { s: hs }));
+  H.slice(0, 13).forEach((h, c) => Y.put(c, 8, h, { s: hs })); LET.forEach((l, c) => Y.put(c, 9, l, { s: hs }));
   const merges = []; let maxY = 11;
   (window.MAPS ? window.MAPS.syn : []).forEach(e => {
     maxY = Math.max(maxY, e.r);
@@ -692,7 +712,7 @@ function exportXlsx(r) {
     maxR = Math.max(maxR, e.r);
     if (e.label) { for (let c = 0; c < 12; c++) R.put(c, e.r, c ? '' : e.label, { s: catS }); rm.push({ s: { r: e.r - 1, c: 0 }, e: { r: e.r - 1, c: 11 } }); return; }
     R.put(0, e.r, e.a, { s: { border: bd } }); R.put(1, e.r, e.u || '', { s: { border: bd } });
-    'CDEFGHIJKL'.split('').forEach((col, i) => { const sc = col === 'L' ? 'M' : col; if (e.t.length) R.put(2 + i, e.r, E.rma(e.r, col), { f: e.t.map(tt => E.refText(tt, 'S', sc, false)).join('+'), s: NUM }); else R.put(2 + i, e.r, '', { s: NUM }); });
+    'CDEFGHIJKL'.split('').forEach((col, i) => { const sc = col === 'L' ? 'M' : col; if (e.t.length) R.put(2 + i, e.r, E.rma(e.r, col), { f: e.t.map(tt => E.refText(tt, 'G', sc, false)).join('+'), s: NUM }); else R.put(2 + i, e.r, '', { s: NUM }); });
   });
   let rr2 = maxR + 2; R.put(1, rr2, 'Nom et Prénom', { s: bold }); R.put(3, rr2, 'Fonction', { s: bold }); R.put(4, rr2, 'N° Téléphone', { s: bold }); rr2++;
   [['Préparé par', 'prep'], ['Approuvé par', 'appr'], ['Reçu au District par', 'recu']].forEach(([l, k]) => { R.put(0, rr2, l, { s: bold }); R.put(1, rr2, r.sign[k].nom); R.put(3, rr2, r.sign[k].fonc); R.put(4, rr2, r.sign[k].tel); rr2++; });
@@ -895,6 +915,7 @@ document.addEventListener('click', async e => {
     case 'pwremove': if (await askPw('Mot de passe actuel') && confirm('Retirer le mot de passe ? Les prix pourront de nouveau être modifiés par tous.')) { delete S.settings.pw; await saveSettings(); viewSettings(); } return;
     case 'pwlock': S.unlockedUntil = 0; return viewSettings();
     case 'catalog': return go('/catalogue');
+    case 'catupdate': return catUpdate();
     case 'settings': return go('/reglages');
     case 'addprod': return dlgProduct();
     case 'more': S.shown += PAGE; { const y = scrollY; renderList(false); scrollTo(0, y); } return;
@@ -911,7 +932,7 @@ document.addEventListener('click', async e => {
     }
     case 'prices': {
       const r = S.rep; let n = 0;
-      for (const c of S.catalog) { const i = r.items.find(x => x.id === c.id); if (!i) { r.items.push({ ...c }); n++; } else if (i.pu !== c.pu || i.drd !== c.drd) { i.pu = c.pu; i.drd = c.drd; n++; } }
+      for (const c of S.catalog) { const i = r.items.find(x => x.id === c.id); if (!i) { r.items.push({ ...c }); n++; } else if (i.pu !== c.pu || i.drd !== c.drd || (i.arr || '') !== (c.arr || '')) { i.pu = c.pu; i.drd = c.drd; i.arr = c.arr || ''; n++; } }
       await saveNow(); return toast(`${n} produit(s) mis à jour`);
     }
     case 'delrep':

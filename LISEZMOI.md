@@ -37,3 +37,6 @@ En local (PC avec Node 22 + JDK 21 + Android Studio) : `npm install && npm run a
 Bouton **📦 Réceptions** en haut du rapport : une réception = une date, un n° de bon et une liste de produits avec quantités. Plusieurs réceptions dans le mois s'additionnent automatiquement dans la colonne « Reçu (B) ». Voir le guide d'utilisation.
 
 Le formulaire de réception affiche prix d'achat (DRD) et prix public unitaires et totaux par produit et pour la liste. **Exporter → Aperçu avant export** montre SIGL, Bilan, SYNTHESE et RMA à l'écran avant de générer le fichier.
+
+## Mise à jour des prix (catalogue 2026-10)
+La version 1.6.0 embarque les prix du classeur GESTION_DEPOT_MEG_CSPS_10 (prix public, prix DRD, n° d'arrêté, 33 nouveaux produits ARV/TB/tests). Sur un appareil déjà utilisé, une bannière « Nouveaux prix disponibles » apparaît sur l'accueil (et dans Réglages) : la mise à jour demande le **mot de passe administrateur** si un mot de passe est défini. Les rapports déjà commencés gardent leurs anciens prix ; pour les mettre à jour : rapport › Infos › « Mettre à jour les prix ». Les produits sans prix dans le classeur sont à 0. Les feuilles Excel exportées sont SIGL_General, Rapport_SIGL et RMA (liens identiques au classeur).
