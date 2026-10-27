@@ -576,7 +576,7 @@ function viewSettings() {
       <div class="row-btns" style="margin:0">${hasPw() ? `<button class="btn sec" data-act="pwchange">Changer le mot de passe</button>${s.pw ? '<button class="btn sec" data-act="pwremove">Retirer le mot de passe</button>' : ''}${!isLocked() ? '<button class="btn sec" data-act="pwlock">Verrouiller maintenant</button>' : ''}` : '<button class="btn" data-act="pwset">Définir un mot de passe</button>'}</div></div>
     <div class="card"><h2>Données</h2><p class="mut" style="margin-top:0">Les données restent sur cet appareil. Faites régulièrement une sauvegarde et transmettez-la au district (WhatsApp, e-mail, clé USB).</p>
       <div class="row-btns" style="margin:0"><button class="btn" data-act="backup">Sauvegarder tout (JSON)</button><button class="btn sec" data-act="import">Restaurer / importer</button><button class="btn sec" data-act="catalog">Catalogue des produits</button>${catOutdated() ? '<button class="btn" data-act="catupdate">💰 Mettre à jour les prix</button>' : ''}</div></div>
-    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.6.1 · fonctionne sans connexion</p></div>`;
+    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.6.2 · fonctionne sans connexion</p></div>`;
   ['s-d', 's-r', 's-rate'].forEach(i => $('#' + i).addEventListener('change', () => { s.district = $('#s-d').value.trim(); s.region = $('#s-r').value.trim(); s.rate = N(num($('#s-rate').value)); saveSettings(); toast('Enregistré'); }));
 }
 
@@ -727,6 +727,7 @@ function exportXlsx(r) {
 /* ---------- export PDF : SIGL + bilan + RMA ---------- */
 const pt = s => String(s == null ? '' : s).replace(/μ/g, 'µ').replace(/−/g, '-').replace(/[  ]/g, ' ').replace(/←/g, '<-').replace(/[^\u0000-ÿ‘’“”–—…€Œœ]/g, '');
 const pf = (n, d = 1) => (n == null || !isFinite(n)) ? '' : pt(fmt(n, d));
+const PDF_PT = 12;   // taille de police des tableaux PDF (points)
 function exportPdf(r, onlyFilled, parts, tag) {
   const { jsPDF } = window.jspdf, doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const E = engine(r), t = totals(r), G = [15, 118, 110], title = `${r.csps} - ${MONTHS[r.month - 1]} ${r.year}`;
@@ -734,15 +735,15 @@ function exportPdf(r, onlyFilled, parts, tag) {
   let firstPage = true;
   const newPage = label => {
     if (!firstPage) doc.addPage(); firstPage = false;
-    doc.setTextColor(0); doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.text('MINISTERE DE LA SANTE', 10, 10); doc.text('BURKINA FASO', 287, 10, { align: 'right' });
+    doc.setTextColor(0); doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.text('MINISTERE DE LA SANTE', 10, 10); doc.text('BURKINA FASO', 287, 10, { align: 'right' });
     doc.setFont('helvetica', 'normal'); doc.text(pt('REGION DE ' + sg.region), 10, 14.5); doc.text('La Patrie ou la Mort, Nous Vaincrons!', 287, 14.5, { align: 'right' });
     doc.text('DIRECTION REGIONALE DE LA SANTE', 10, 19);
     doc.text(pt(`DISTRICT SANITAIRE DE : ${sg.district}      CSPS DE : ${r.csps}`), 10, 24);
     doc.text(pt(`MOIS DE ${MONTHS[r.month - 1]} ${r.year}      Nombre de jours : ${r.days}      Date : ${r.date ? r.date.split('-').reverse().join('/') : ''}`), 10, 28.5);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(pt(label), 148.5, 34, { align: 'center' });
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.text(pt(label), 148.5, 34, { align: 'center' });
   };
-  const common = { theme: 'grid', styles: { font: 'helvetica', fontSize: 6.8, cellPadding: 1, lineColor: [150, 150, 150], lineWidth: 0.1, overflow: 'linebreak' }, headStyles: { fillColor: G, textColor: 255, halign: 'center', valign: 'middle', fontSize: 6.5 }, margin: { left: 10, right: 10, top: 14, bottom: 10 } };
-  const sign = y => doc.autoTable({ ...common, startY: y, head: [['', 'Nom et prénom', 'Fonction', 'N° de téléphone', 'Date', 'Signature']], body: [['Préparé par', r.sign.prep.nom, r.sign.prep.fonc, r.sign.prep.tel, '', ''], ['Approuvé par', r.sign.appr.nom, r.sign.appr.fonc, r.sign.appr.tel, '', ''], ['Reçu au District par', r.sign.recu.nom, r.sign.recu.fonc, r.sign.recu.tel, '', '']].map(a => a.map(pt)), styles: { ...common.styles, fontSize: 8.5, minCellHeight: 11, valign: 'middle' }, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 38 }, 5: { cellWidth: 50 } } });
+  const common = { theme: 'grid', styles: { font: 'helvetica', fontSize: PDF_PT, cellPadding: 1.2, lineColor: [150, 150, 150], lineWidth: 0.1, overflow: 'linebreak' }, headStyles: { fillColor: G, textColor: 255, halign: 'center', valign: 'middle', fontSize: PDF_PT - 1 }, margin: { left: 10, right: 10, top: 14, bottom: 10 }, horizontalPageBreak: true, horizontalPageBreakRepeat: [0] };
+  const sign = y => doc.autoTable({ ...common, startY: y, head: [['', 'Nom et prénom', 'Fonction', 'N° de téléphone', 'Date', 'Signature']], body: [['Préparé par', r.sign.prep.nom, r.sign.prep.fonc, r.sign.prep.tel, '', ''], ['Approuvé par', r.sign.appr.nom, r.sign.appr.fonc, r.sign.appr.tel, '', ''], ['Reçu au District par', r.sign.recu.nom, r.sign.recu.fonc, r.sign.recu.tel, '', '']].map(a => a.map(pt)), styles: { ...common.styles, fontSize: PDF_PT, minCellHeight: 11, valign: 'middle' }, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 38 }, 5: { cellWidth: 50 } } });
   const catRow = (label, n) => [{ content: pt(label), colSpan: n, styles: { fontStyle: 'bold', fillColor: [255, 236, 214], halign: 'left' } }];
   // tableau de regroupement (SYNTHESE / RMA) : lignes de catégories + produits, avec filtre "renseignés"
   const grouped = (entries, valFn, cols, widths, head) => {
@@ -771,7 +772,7 @@ function exportPdf(r, onlyFilled, parts, tag) {
       ...common, startY: 37,
       head: [['Désignation', 'Unité', 'Début (A)', 'Reçu (B)', 'Consommé (C)', 'Périmé (D)', 'Autres pertes (E)', 'Ajust. - (F-)', 'Ajust. + (F+)', 'Stock fin (G)', 'Jours rupture (H)', 'Conso. ajustée (I)', 'À commander (J)', 'Prix unit. CSPS', 'Vente prix public'].map(pt)],
       body: body.map(b => b.slice(0, 15)),
-      columnStyles: { 0: { cellWidth: 70 }, 1: { cellWidth: 18 }, ...Object.fromEntries(Array.from({ length: 13 }, (_, i) => [i + 2, { ...right, cellWidth: 14.1 }])) },
+      columnStyles: { 0: { cellWidth: 80 }, 1: { cellWidth: 22 }, ...Object.fromEntries(Array.from({ length: 13 }, (_, i) => [i + 2, { ...right, cellWidth: 25 }])) },
       didParseCell: d => { if (d.section === 'body') { const f = body[d.row.index]; if (f[15] && d.column.index === 0) d.cell.styles.fillColor = [255, 236, 214]; if (f[16] && d.column.index === 4) d.cell.styles.textColor = [185, 28, 28]; } }
     });
     if (!body.length) { doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.text('Aucun produit renseigné.', 10, 48); }
@@ -780,7 +781,7 @@ function exportPdf(r, onlyFilled, parts, tag) {
   // 2) Bilan
   if (has('bilan')) {
     newPage('BILAN DU MOIS'); const fin = r.fin, ok = t.ratio != null && t.ratio >= 0.98 && t.ratio <= 1.02;
-    const two = (rows, y, x, w) => doc.autoTable({ ...common, startY: y, showHead: false, body: rows.map(a => a.map(pt)), tableWidth: w, margin: { left: x, right: 297 - x - w, top: 14, bottom: 10 }, columnStyles: { 0: { cellWidth: w - 34 }, 1: { halign: 'right', fontStyle: 'bold', cellWidth: 34 } }, styles: { ...common.styles, fontSize: 8.2, cellPadding: 1.5 } });
+    const two = (rows, y, x, w) => doc.autoTable({ ...common, startY: y, showHead: false, body: rows.map(a => a.map(pt)), tableWidth: w, margin: { left: x, right: 297 - x - w, top: 14, bottom: 10 }, columnStyles: { 0: { cellWidth: w - 34 }, 1: { halign: 'right', fontStyle: 'bold', cellWidth: 34 } }, styles: { ...common.styles, fontSize: PDF_PT, cellPadding: 1.5 } });
     two([['Valeur du stock au début du mois (prix public)', pf(t.R, 0) + ' F'], ['Valeur des MEG reçues (prix public)', pf(t.S, 0) + ' F'], ['Total vente du mois au prix public (DMEG)', pf(t.Q, 0) + ' F'], ['Total vente du mois au prix DRD', pf(t.P, 0) + ' F'], ['Valeur du stock en fin de mois (prix public)', pf(t.T, 0) + ' F'], ['Valeur du stock périmé / cassé (prix public)', pf(t.U, 0) + ' F']], 40, 10, 136);
     const yL = doc.lastAutoTable.finalY;
     two([['Taux de rupture des traceurs DMEG', t.tauxRup == null ? '-' : pf(t.tauxRup, 1) + ' %'], ['Durée moyenne de rupture des traceurs (jours)', t.durRup == null ? '-' : pf(t.durRup, 1)], ['Marge théorique du mois', pf(t.marge, 0) + ' F'], [`Rétrocession maximum sur recettes en liquidité (${pf(N(fin.rate), 2)} %)`, pf(t.retro, 0) + ' F']], yL + 5, 10, 136);
@@ -793,19 +794,19 @@ function exportPdf(r, onlyFilled, parts, tag) {
   // 3) SYNTHESE
   if (has('syn')) {
     newPage('RAPPORT SIGL PAR PROGRAMME - RAPPORT DE GESTION ET DE COMMANDE DES PRODUITS DE SANTE');
-    grouped(window.MAPS ? window.MAPS.syn : [], (n, c) => E.syn(n, c), 11, [70, 18, 17.1],
+    grouped(window.MAPS ? window.MAPS.syn : [], (n, c) => E.syn(n, c), 11, [80, 22, 25],
       ['Désignation', 'Unité', 'Début (A)', 'Reçu (B)', 'Consommé (C)', 'Périmé (D)', 'Autres pertes (E)', 'Ajust. - (F-)', 'Ajust. + (F+)', 'Stock fin (G)', 'Jours rupture (H)', 'Conso. ajustée (I)', 'À commander (J)']);
   }
 
   // 4) RMA
   if (has('rma')) {
     newPage(`RMA - RAPPORT MENSUEL D'ACTIVITES DES MEG - FORMATION SANITAIRE : ${r.csps}`);
-    grouped(window.MAPS ? window.MAPS.rma : [], (n, c) => E.rma(n, c), 10, [82, 24, 17.1],
+    grouped(window.MAPS ? window.MAPS.rma : [], (n, c) => E.rma(n, c), 10, [90, 24, 25],
       ['Désignation', 'Unité', 'Qtité dispo en début (A)', 'Quantité reçue (B)', 'Quantité consommée (C)', 'Quantité périmée (D)', 'Autres pertes (E)', 'Ajust. - (F-)', 'Ajust. + (F+)', 'Qtité disponible (G)', 'Jours de rupture (H)', 'Quantité à commander (I)']);
   }
 
   const nP = doc.getNumberOfPages();
-  for (let i = 1; i <= nP; i++) { doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(110); doc.text(pt(`SIGL Saisie MEG - ${title}`), 10, 205); doc.text(`Page ${i} / ${nP}`, 287, 205, { align: 'right' }); }
+  for (let i = 1; i <= nP; i++) { doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(110); doc.text(pt(`SIGL Saisie MEG - ${title}`), 10, 205); doc.text(`Page ${i} / ${nP}`, 287, 205, { align: 'right' }); }
   saveFile(`${tag}_${safe(r.csps)}_${r.year}-${pad2(r.month)}.pdf`, doc.output('blob'));
 }
 
