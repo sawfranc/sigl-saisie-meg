@@ -576,7 +576,7 @@ function viewSettings() {
       <div class="row-btns" style="margin:0">${hasPw() ? `<button class="btn sec" data-act="pwchange">Changer le mot de passe</button>${s.pw ? '<button class="btn sec" data-act="pwremove">Retirer le mot de passe</button>' : ''}${!isLocked() ? '<button class="btn sec" data-act="pwlock">Verrouiller maintenant</button>' : ''}` : '<button class="btn" data-act="pwset">Définir un mot de passe</button>'}</div></div>
     <div class="card"><h2>Données</h2><p class="mut" style="margin-top:0">Les données restent sur cet appareil. Faites régulièrement une sauvegarde et transmettez-la au district (WhatsApp, e-mail, clé USB).</p>
       <div class="row-btns" style="margin:0"><button class="btn" data-act="backup">Sauvegarder tout (JSON)</button><button class="btn sec" data-act="import">Restaurer / importer</button><button class="btn sec" data-act="catalog">Catalogue des produits</button>${catOutdated() ? '<button class="btn" data-act="catupdate">💰 Mettre à jour les prix</button>' : ''}</div></div>
-    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.6.2 · fonctionne sans connexion</p></div>`;
+    <p class="mut" style="text-align:center">SIGL Saisie MEG · version 1.6.3 · fonctionne sans connexion</p></div>`;
   ['s-d', 's-r', 's-rate'].forEach(i => $('#' + i).addEventListener('change', () => { s.district = $('#s-d').value.trim(); s.region = $('#s-r').value.trim(); s.rate = N(num($('#s-rate').value)); saveSettings(); toast('Enregistré'); }));
 }
 
@@ -746,7 +746,7 @@ function exportPdf(r, onlyFilled, parts, tag) {
   const sign = y => doc.autoTable({ ...common, startY: y, head: [['', 'Nom et prénom', 'Fonction', 'N° de téléphone', 'Date', 'Signature']], body: [['Préparé par', r.sign.prep.nom, r.sign.prep.fonc, r.sign.prep.tel, '', ''], ['Approuvé par', r.sign.appr.nom, r.sign.appr.fonc, r.sign.appr.tel, '', ''], ['Reçu au District par', r.sign.recu.nom, r.sign.recu.fonc, r.sign.recu.tel, '', '']].map(a => a.map(pt)), styles: { ...common.styles, fontSize: PDF_PT, minCellHeight: 11, valign: 'middle' }, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 38 }, 5: { cellWidth: 50 } } });
   const catRow = (label, n) => [{ content: pt(label), colSpan: n, styles: { fontStyle: 'bold', fillColor: [255, 236, 214], halign: 'left' } }];
   // tableau de regroupement (SYNTHESE / RMA) : lignes de catégories + produits, avec filtre "renseignés"
-  const grouped = (entries, valFn, cols, widths, head) => {
+  const grouped = (entries, valFn, cols, widths, head, pts = PDF_PT) => {
     const cl = 'CDEFGHIJKLM'.slice(0, cols), rows = []; let pend = null;
     entries.forEach(e => {
       if (e.label) { pend = catRow(e.label, cols + 2); if (!onlyFilled) { rows.push(pend); pend = null; } return; }
@@ -755,7 +755,7 @@ function exportPdf(r, onlyFilled, parts, tag) {
       if (pend) { rows.push(pend); pend = null; }
       rows.push([pt(e.a), pt(e.u || ''), ...vals.map(v => v == null ? '' : pf(v, 2))]);
     });
-    doc.autoTable({ ...common, startY: 37, head: [head.map(pt)], body: rows, columnStyles: { 0: { cellWidth: widths[0] }, 1: { cellWidth: widths[1] }, ...Object.fromEntries(Array.from({ length: cols }, (_, i) => [i + 2, { ...right, cellWidth: widths[2] }])) } });
+    doc.autoTable({ ...common, styles: { ...common.styles, fontSize: pts }, headStyles: { ...common.headStyles, fontSize: pts - 1 }, startY: 37, head: [head.map(pt)], body: rows, columnStyles: { 0: { cellWidth: widths[0] }, 1: { cellWidth: widths[1] }, ...Object.fromEntries(Array.from({ length: cols }, (_, i) => [i + 2, { ...right, cellWidth: widths[2] }])) } });
     if (!rows.length) { doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.text('Aucun produit renseigné.', 10, 48); }
     sign((rows.length ? doc.lastAutoTable.finalY : 48) + 8);
   };
@@ -801,8 +801,8 @@ function exportPdf(r, onlyFilled, parts, tag) {
   // 4) RMA
   if (has('rma')) {
     newPage(`RMA - RAPPORT MENSUEL D'ACTIVITES DES MEG - FORMATION SANITAIRE : ${r.csps}`);
-    grouped(window.MAPS ? window.MAPS.rma : [], (n, c) => E.rma(n, c), 10, [90, 24, 25],
-      ['Désignation', 'Unité', 'Qtité dispo en début (A)', 'Quantité reçue (B)', 'Quantité consommée (C)', 'Quantité périmée (D)', 'Autres pertes (E)', 'Ajust. - (F-)', 'Ajust. + (F+)', 'Qtité disponible (G)', 'Jours de rupture (H)', 'Quantité à commander (I)']);
+    grouped(window.MAPS ? window.MAPS.rma : [], (n, c) => E.rma(n, c), 10, [48, 19, 21],
+      ['Désignation', 'Unité', 'Qtité dispo en début (A)', 'Quantité reçue (B)', 'Quantité consommée (C)', 'Quantité périmée (D)', 'Autres pertes (E)', 'Ajust. - (F-)', 'Ajust. + (F+)', 'Qtité disponible (G)', 'Jours de rupture (H)', 'Quantité à commander (I)'], 10);
   }
 
   const nP = doc.getNumberOfPages();
